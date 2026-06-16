@@ -434,7 +434,10 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
                     "The demo used deterministic scoring while preserving the onchain transaction link."
                 )
             elif read_error:
-                raise read_error
+                result["reasoning_summary"] = (
+                    "GenLayer RPC readback timed out before the judgment could be fetched. "
+                    "The demo used deterministic scoring so the marketplace policy flow can continue."
+                )
     else:
         result = mock_judgment(dispute.reason, deliverable.summary)
 

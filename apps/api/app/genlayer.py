@@ -37,7 +37,12 @@ class GenLayerClient:
             timeout=240,
         )
         output = f"{completed.stdout}\n{completed.stderr}"
-        if completed.returncode != 0 and not self._accepted_receipt(output) and not self._parse_tx_hash(output):
+        if (
+            completed.returncode != 0
+            and not self._accepted_receipt(output)
+            and not self._parse_tx_hash(output)
+            and not self._rpc_fetch_failed(output)
+        ):
             raise RuntimeError(output)
         return output
 
@@ -46,6 +51,15 @@ class GenLayerClient:
             return {"mode": "mock", "method": method, "tx_id": f"mock-{method}"}
         output = self._run(["write", self.contract_address, method, "--args", *[str(arg) for arg in args]], password=True)
         tx_id = self._parse_tx_hash(output)
+        if self._rpc_fetch_failed(output) and not tx_id:
+            return {
+                "mode": "live",
+                "method": method,
+                "tx_id": "",
+                "contract_address": self.contract_address,
+                "verify_url": "",
+                "warning": "GenLayer RPC timed out before transaction confirmation. Demo continued with local state.",
+            }
         if tx_id and self._rpc_fetch_failed(output):
             return {
                 "mode": "live",
