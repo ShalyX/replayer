@@ -13,12 +13,22 @@ type Assessment = {
   recommendation: "low_risk" | "manual_review" | "high_risk";
   confidence: number;
   reasons: string[];
+  timeline: TimelineEvent[];
   policy_result: {
     evaluated: boolean;
     eligible: boolean | null;
     outcome: "eligible" | "ineligible";
     reasons: string[];
   };
+};
+
+type TimelineEvent = {
+  date: string;
+  marker: string;
+  title: string;
+  detail: string;
+  severity: "neutral" | "success" | "warning" | "danger";
+  verify_url?: string;
 };
 
 const enterprisePolicy = {
@@ -37,6 +47,43 @@ const fallbackDeepResearch: Assessment = {
   recommendation: "high_risk",
   confidence: 0.94,
   reasons: ["Fraudulent judgment recorded on GenLayer", "Flagged status"],
+  timeline: [
+    {
+      date: "May 12",
+      marker: "✓",
+      title: "Research job completed",
+      detail: "DeepResearchBot completed a sourced research task on ResearchAgents.io.",
+      severity: "success",
+    },
+    {
+      date: "May 14",
+      marker: "✓",
+      title: "Market report accepted",
+      detail: "Buyer accepted the first deliverable and reputation increased.",
+      severity: "success",
+    },
+    {
+      date: "May 16",
+      marker: "⚠",
+      title: "Dispute opened",
+      detail: "Buyer disputed fabricated citations in a fintech research report.",
+      severity: "warning",
+    },
+    {
+      date: "May 16",
+      marker: "🚨",
+      title: "Fraudulent judgment recorded on GenLayer",
+      detail: "RepLayer records a verified fraud incident as portable reputation.",
+      severity: "danger",
+    },
+    {
+      date: "May 17",
+      marker: "⚖",
+      title: "EnterpriseAgents policy check: ineligible",
+      detail: "No flagged agents for enterprise research jobs.",
+      severity: "danger",
+    },
+  ],
   policy_result: {
     evaluated: true,
     eligible: false,
@@ -54,6 +101,29 @@ const researchPro: Assessment = {
   recommendation: "low_risk",
   confidence: 0.88,
   reasons: ["No material risk signals found"],
+  timeline: [
+    {
+      date: "May 12",
+      marker: "✓",
+      title: "Research job completed",
+      detail: "ResearchPro completed a sourced research task.",
+      severity: "success",
+    },
+    {
+      date: "May 14",
+      marker: "✓",
+      title: "Market report accepted",
+      detail: "Buyer accepted the deliverable with no dispute.",
+      severity: "success",
+    },
+    {
+      date: "May 17",
+      marker: "⚖",
+      title: "EnterpriseAgents policy check: eligible",
+      detail: "Agent satisfies this marketplace policy.",
+      severity: "success",
+    },
+  ],
   policy_result: {
     evaluated: true,
     eligible: true,
@@ -158,6 +228,28 @@ export default function MarketplaceConsole() {
           </div>
           <p className="policy-note">{status}</p>
         </section>
+      </section>
+
+      <section className="timeline-panel">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Reputation timeline</p>
+            <h2>Trust history, not just a score.</h2>
+          </div>
+        </div>
+        <ol className="audit-timeline">
+          {selectedAssessment.timeline.map((event, index) => (
+            <li className={`audit-event ${event.severity}`} key={`${event.date}-${event.title}-${index}`}>
+              <span className="audit-date">{event.date}</span>
+              <span className="audit-marker">{event.marker}</span>
+              <div>
+                <strong>{event.title}</strong>
+                <p>{event.detail}</p>
+                {event.verify_url ? <a href={event.verify_url} target="_blank" rel="noreferrer">View judgment</a> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
       </section>
     </main>
   );

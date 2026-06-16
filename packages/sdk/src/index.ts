@@ -84,6 +84,16 @@ export type TrustEvaluateInput = {
   policy?: TrustPolicy;
 };
 
+export type ReputationTimelineEvent = {
+  date: string;
+  timestamp: string;
+  marker: string;
+  title: string;
+  detail: string;
+  severity: "neutral" | "success" | "warning" | "danger";
+  verify_url: string;
+};
+
 export type TrustEvaluation = {
   agent_id: string;
   job_type: string;
@@ -96,6 +106,7 @@ export type TrustEvaluation = {
   confidence: number;
   reasons: string[];
   latest_judgment: Judgment | null;
+  timeline: ReputationTimelineEvent[];
   policy_result: {
     evaluated: boolean;
     eligible: boolean | null;

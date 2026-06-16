@@ -449,6 +449,80 @@ h1 {
   color: #0b6466;
 }
 
+.timeline-panel {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 18px;
+}
+
+.audit-timeline {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-event {
+  display: grid;
+  grid-template-columns: 86px 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.audit-event:first-child {
+  border-top: 0;
+}
+
+.audit-date {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.audit-marker {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.audit-event.success .audit-marker {
+  background: #eef6f6;
+  color: #0b6466;
+}
+
+.audit-event.warning .audit-marker {
+  background: #fff7e6;
+  color: #8a5a00;
+}
+
+.audit-event.danger .audit-marker {
+  background: #fde8ee;
+  color: var(--danger);
+}
+
+.audit-event strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.audit-event p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.audit-event a {
+  display: inline-flex;
+  margin-top: 8px;
+  color: #0b6466;
+  font-weight: 700;
+}
+
 .agent-compare-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -486,6 +486,7 @@ def get_history(agent_id: str, db: Session = Depends(get_db)) -> dict:
         "disputes": [dispute_to_dict(d) for d in db.scalars(select(Dispute).join(Job).where(Job.provider_agent_id == agent_id)).all()],
         "judgments": [judgment_to_dict(j) for j in db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == agent_id)).all()],
         "reputation_snapshots": [snapshot_dict(snapshot) | {"reason": snapshot.reason} for snapshot in snapshots],
+        "timeline": build_reputation_timeline(db, agent_id),
     }
 
 
@@ -557,6 +558,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
             policy_reasons.append("Policy does not allow flagged agents")
 
     latest_fraud = fraud_judgments[-1] if fraud_judgments else None
+    policy_outcome = "eligible" if eligible else "ineligible"
     return {
         "agent_id": payload.agent_id,
         "job_type": payload.job_type,
@@ -572,10 +574,22 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
         "policy_result": {
             "evaluated": policy is not None,
             "eligible": eligible if policy else None,
-            "outcome": "eligible" if eligible else "ineligible",
+            "outcome": policy_outcome,
             "reasons": policy_reasons,
             "policy": policy.model_dump() if policy else None,
         },
+        "timeline": build_reputation_timeline(
+            db,
+            payload.agent_id,
+            policy_event={
+                "platform": "EnterpriseAgents.io",
+                "title": f"Policy check: {policy_outcome}",
+                "detail": policy_reasons[0] if policy_reasons else "Agent satisfies this marketplace policy.",
+                "severity": "danger" if not eligible else "success",
+            }
+            if policy
+            else None,
+        ),
     }
 
 
@@ -584,6 +598,100 @@ def require_job(db: Session, job_id: str) -> Job:
     if not job:
         raise HTTPException(status_code=404, detail="Unknown job")
     return job
+
+
+def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | None = None) -> list[dict]:
+    jobs = db.scalars(select(Job).where(Job.provider_agent_id == agent_id)).all()
+    job_ids = [job.id for job in jobs]
+    deliverables = db.scalars(select(Deliverable).where(Deliverable.job_id.in_(job_ids))).all() if job_ids else []
+    disputes = db.scalars(select(Dispute).where(Dispute.job_id.in_(job_ids))).all() if job_ids else []
+    judgments = db.scalars(select(Judgment).where(Judgment.job_id.in_(job_ids))).all() if job_ids else []
+
+    events = []
+    for job in jobs:
+        events.append(
+            timeline_event(
+                job.created_at,
+                "✓" if job.status in {"accepted"} else "•",
+                "Job created",
+                job.task_spec,
+                "neutral",
+            )
+        )
+        if job.status == "accepted":
+            events.append(timeline_event(job.updated_at, "✓", "Job accepted", job.task_spec, "success"))
+
+    for deliverable in deliverables:
+        events.append(
+            timeline_event(
+                deliverable.submitted_at,
+                "✓",
+                "Deliverable submitted",
+                deliverable.summary or deliverable.deliverable_uri,
+                "success",
+            )
+        )
+
+    for dispute in disputes:
+        events.append(
+            timeline_event(
+                dispute.opened_at,
+                "⚠",
+                "Dispute opened",
+                dispute.reason,
+                "warning",
+            )
+        )
+
+    for judgment in judgments:
+        is_fraud = judgment.verdict == "fraudulent"
+        events.append(
+            timeline_event(
+                judgment.created_at,
+                "🚨" if is_fraud else "✓",
+                "Fraudulent judgment recorded on GenLayer" if is_fraud else f"Judgment recorded: {judgment.verdict}",
+                judgment.reasoning_summary,
+                "danger" if is_fraud else "success",
+                judgment.verify_url,
+            )
+        )
+
+    if policy_event:
+        events.append(
+            timeline_event(
+                None,
+                "⚖",
+                f"{policy_event['platform']} {policy_event['title']}",
+                policy_event["detail"],
+                policy_event["severity"],
+            )
+        )
+
+    events.sort(key=lambda event: event["sort_key"])
+    for event in events:
+        event.pop("sort_key", None)
+    return events
+
+
+def timeline_event(
+    occurred_at,
+    marker: str,
+    title: str,
+    detail: str,
+    severity: str,
+    verify_url: str = "",
+) -> dict:
+    timestamp = occurred_at.isoformat() if occurred_at else ""
+    return {
+        "date": occurred_at.strftime("%b %d") if occurred_at else "Now",
+        "timestamp": timestamp,
+        "marker": marker,
+        "title": title,
+        "detail": detail,
+        "severity": severity,
+        "verify_url": verify_url,
+        "sort_key": timestamp or "9999-12-31T23:59:59",
+    }
 
 
 def reset_demo_data(db: Session) -> dict:

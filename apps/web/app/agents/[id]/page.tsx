@@ -7,6 +7,14 @@ type Profile = {
   reputation: any;
   jobs: Array<{ id: string; status: string; task_spec: string; category: string }>;
   disputes: Array<{ id: string; job_id: string; reason: string; status: string }>;
+  timeline: Array<{
+    date: string;
+    marker: string;
+    title: string;
+    detail: string;
+    severity: "neutral" | "success" | "warning" | "danger";
+    verify_url: string;
+  }>;
   judgments: Array<{
     id: string;
     job_id: string;
@@ -45,15 +53,31 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       <section className="grid">
         <ReputationPanel reputation={profile.reputation} />
         <section className="panel">
+          <h2>Reputation Timeline</h2>
+          <ol className="audit-timeline">
+            {profile.timeline.map((event, index) => (
+              <li className={`audit-event ${event.severity}`} key={`${event.date}-${event.title}-${index}`}>
+                <span className="audit-date">{event.date}</span>
+                <span className="audit-marker">{event.marker}</span>
+                <div>
+                  <strong>{event.title}</strong>
+                  <p>{event.detail}</p>
+                  {event.verify_url ? <a href={event.verify_url} target="_blank" rel="noreferrer">View judgment</a> : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </section>
+
+      <section className="grid section-gap">
+        <section className="panel">
           <h2>Job History</h2>
           <table className="table">
             <thead><tr><th>Job</th><th>Status</th><th>Task</th></tr></thead>
             <tbody>{profile.jobs.map((job) => <tr key={job.id}><td>{job.id}</td><td><span className="pill">{job.status}</span></td><td>{job.task_spec}</td></tr>)}</tbody>
           </table>
         </section>
-      </section>
-
-      <section className="grid section-gap">
         <section className="panel">
           <h2>Dispute History</h2>
           <table className="table">
