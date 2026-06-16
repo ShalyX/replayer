@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { ReputationTimeline, type TimelineEvent } from "../../components/ReputationTimeline";
 import { api } from "../../lib/api";
 
 type Assessment = {
@@ -22,15 +23,6 @@ type Assessment = {
   };
 };
 
-type TimelineEvent = {
-  date: string;
-  marker: string;
-  title: string;
-  detail: string;
-  severity: "neutral" | "success" | "warning" | "danger";
-  verify_url?: string;
-};
-
 const enterprisePolicy = {
   min_trust_score: 70,
   max_risk_score: 30,
@@ -49,39 +41,137 @@ const fallbackDeepResearch: Assessment = {
   reasons: ["Fraudulent judgment recorded on GenLayer", "Flagged status"],
   timeline: [
     {
+      id: "demo-research-completed",
+      type: "job_accepted",
       date: "May 12",
       marker: "✓",
       title: "Research job completed",
       detail: "DeepResearchBot completed a sourced research task on ResearchAgents.io.",
       severity: "success",
+      evidence: {
+        job: {
+          id: "research_good_demo",
+          platform_id: "researchagents_io",
+          requester_id: "buyer_series_a",
+          task_spec: "Research five AI infrastructure companies with real sources.",
+          category: "research",
+          payment_amount: 100,
+          currency: "USDC",
+          status: "accepted",
+        },
+        deliverable: {
+          id: "deliv_research_good_demo",
+          deliverable_uri: "https://example.com/good-research",
+          summary: "Completed the research task with credible sources.",
+          evidence_urls: ["https://example.com/source-good"],
+        },
+      },
     },
     {
+      id: "demo-market-report-accepted",
+      type: "job_accepted",
       date: "May 14",
       marker: "✓",
       title: "Market report accepted",
       detail: "Buyer accepted the first deliverable and reputation increased.",
       severity: "success",
+      evidence: {
+        job: {
+          id: "market_report_demo",
+          platform_id: "researchagents_io",
+          requester_id: "buyer_market",
+          task_spec: "Prepare market analysis with verified citation links.",
+          category: "research",
+          payment_amount: 175,
+          currency: "USDC",
+          status: "accepted",
+        },
+      },
     },
     {
+      id: "demo-dispute-opened",
+      type: "dispute_opened",
       date: "May 16",
       marker: "⚠",
       title: "Dispute opened",
       detail: "Buyer disputed fabricated citations in a fintech research report.",
       severity: "warning",
+      evidence: {
+        job: {
+          id: "research_fraud_demo",
+          platform_id: "researchagents_io",
+          requester_id: "buyer_fintech",
+          task_spec: "Find top 20 Series A fintech startups in Brazil with citations.",
+          category: "research",
+          payment_amount: 250,
+          currency: "USDC",
+          status: "disputed",
+        },
+        dispute: {
+          id: "disp_research_fraud_demo",
+          claimant: "requester",
+          reason: "Several companies are not Series A and two citations are fabricated.",
+          evidence_uri: "https://example.com/dispute.txt",
+          bond_amount: 10,
+          status: "open",
+        },
+      },
     },
     {
+      id: "demo-fraud-judgment",
+      type: "genlayer_judgment",
       date: "May 16",
       marker: "🚨",
       title: "Fraudulent judgment recorded on GenLayer",
       detail: "RepLayer records a verified fraud incident as portable reputation.",
       severity: "danger",
+      verify_url: "https://explorer-studio.genlayer.com/tx/0x7bee0d27577a023aaf1a1f1a5d32578b39682b4b190dc29ca0d62ccc391aa52f",
+      evidence: {
+        job: {
+          id: "research_fraud_demo",
+          platform_id: "researchagents_io",
+          requester_id: "buyer_fintech",
+          task_spec: "Find top 20 Series A fintech startups in Brazil with citations.",
+          category: "research",
+          payment_amount: 250,
+          currency: "USDC",
+          status: "judged_fraudulent",
+        },
+        dispute: {
+          id: "disp_research_fraud_demo",
+          claimant: "requester",
+          reason: "Several companies are not Series A and two citations are fabricated.",
+          evidence_uri: "https://example.com/dispute.txt",
+          bond_amount: 10,
+          status: "resolved",
+        },
+        judgment: {
+          id: "judgment_demo",
+          verdict: "fraudulent",
+          reasoning_summary: "Dispute evidence states that the research deliverable used fabricated citations or false claims.",
+          source: "genlayer",
+          contract_address: "0x59a8924E6E7D3A460e2154a304fCC2BEfEc3c8Dd",
+          tx_hash: "0x7bee0d27577a023aaf1a1f1a5d32578b39682b4b190dc29ca0d62ccc391aa52f",
+          verify_url: "https://explorer-studio.genlayer.com/tx/0x7bee0d27577a023aaf1a1f1a5d32578b39682b4b190dc29ca0d62ccc391aa52f",
+          timestamp: "2026-05-16T10:30:00",
+        },
+      },
     },
     {
+      id: "demo-policy-check",
+      type: "policy_check",
       date: "May 17",
       marker: "⚖",
       title: "EnterpriseAgents policy check: ineligible",
       detail: "No flagged agents for enterprise research jobs.",
       severity: "danger",
+      evidence: {
+        policy: {
+          platform: "EnterpriseAgents.io",
+          result: "ineligible",
+          reason: "No flagged agents for enterprise research jobs.",
+        },
+      },
     },
   ],
   policy_result: {
@@ -103,25 +193,58 @@ const researchPro: Assessment = {
   reasons: ["No material risk signals found"],
   timeline: [
     {
+      id: "researchpro-research-completed",
+      type: "job_accepted",
       date: "May 12",
       marker: "✓",
       title: "Research job completed",
       detail: "ResearchPro completed a sourced research task.",
       severity: "success",
+      evidence: {
+        job: {
+          id: "researchpro_good_demo",
+          platform_id: "enterpriseagents_io",
+          requester_id: "buyer_enterprise",
+          task_spec: "Research enterprise AI infrastructure vendors with verified sources.",
+          category: "research",
+          payment_amount: 300,
+          currency: "USDC",
+          status: "accepted",
+        },
+      },
     },
     {
+      id: "researchpro-market-accepted",
+      type: "job_accepted",
       date: "May 14",
       marker: "✓",
       title: "Market report accepted",
       detail: "Buyer accepted the deliverable with no dispute.",
       severity: "success",
+      evidence: {
+        deliverable: {
+          id: "deliv_researchpro_market_demo",
+          deliverable_uri: "https://example.com/researchpro-report",
+          summary: "Market report accepted with verified citations.",
+          evidence_urls: ["https://example.com/researchpro-source"],
+        },
+      },
     },
     {
+      id: "researchpro-policy-check",
+      type: "policy_check",
       date: "May 17",
       marker: "⚖",
       title: "EnterpriseAgents policy check: eligible",
       detail: "Agent satisfies this marketplace policy.",
       severity: "success",
+      evidence: {
+        policy: {
+          platform: "EnterpriseAgents.io",
+          result: "eligible",
+          reason: "Agent satisfies this marketplace policy.",
+        },
+      },
     },
   ],
   policy_result: {
@@ -230,27 +353,7 @@ export default function MarketplaceConsole() {
         </section>
       </section>
 
-      <section className="timeline-panel">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Reputation timeline</p>
-            <h2>Trust history, not just a score.</h2>
-          </div>
-        </div>
-        <ol className="audit-timeline">
-          {selectedAssessment.timeline.map((event, index) => (
-            <li className={`audit-event ${event.severity}`} key={`${event.date}-${event.title}-${index}`}>
-              <span className="audit-date">{event.date}</span>
-              <span className="audit-marker">{event.marker}</span>
-              <div>
-                <strong>{event.title}</strong>
-                <p>{event.detail}</p>
-                {event.verify_url ? <a href={event.verify_url} target="_blank" rel="noreferrer">View judgment</a> : null}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <ReputationTimeline events={selectedAssessment.timeline} />
     </main>
   );
 }

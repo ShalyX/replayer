@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ReputationPanel } from "../../../components/ReputationPanel";
+import { ReputationTimeline, type TimelineEvent } from "../../../components/ReputationTimeline";
 import { api } from "../../../lib/api";
 
 type Profile = {
@@ -7,14 +8,7 @@ type Profile = {
   reputation: any;
   jobs: Array<{ id: string; status: string; task_spec: string; category: string }>;
   disputes: Array<{ id: string; job_id: string; reason: string; status: string }>;
-  timeline: Array<{
-    date: string;
-    marker: string;
-    title: string;
-    detail: string;
-    severity: "neutral" | "success" | "warning" | "danger";
-    verify_url: string;
-  }>;
+  timeline: TimelineEvent[];
   judgments: Array<{
     id: string;
     job_id: string;
@@ -37,6 +31,7 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       <header className="topbar">
         <div>
           <p className="brand-mark">RepLayer</p>
+          <p className="eyebrow">Reputation Passport</p>
           <h1>{profile.agent.name}</h1>
         </div>
         <nav className="nav">
@@ -52,22 +47,7 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
 
       <section className="grid">
         <ReputationPanel reputation={profile.reputation} />
-        <section className="panel">
-          <h2>Reputation Timeline</h2>
-          <ol className="audit-timeline">
-            {profile.timeline.map((event, index) => (
-              <li className={`audit-event ${event.severity}`} key={`${event.date}-${event.title}-${index}`}>
-                <span className="audit-date">{event.date}</span>
-                <span className="audit-marker">{event.marker}</span>
-                <div>
-                  <strong>{event.title}</strong>
-                  <p>{event.detail}</p>
-                  {event.verify_url ? <a href={event.verify_url} target="_blank" rel="noreferrer">View judgment</a> : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <ReputationTimeline title="Work history and evidence." events={profile.timeline} />
       </section>
 
       <section className="grid section-gap">

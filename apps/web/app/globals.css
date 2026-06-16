@@ -456,6 +456,13 @@ h1 {
   padding: 18px;
 }
 
+.timeline-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
 .audit-timeline {
   display: grid;
   gap: 0;
@@ -465,16 +472,34 @@ h1 {
 }
 
 .audit-event {
-  display: grid;
-  grid-template-columns: 86px 36px minmax(0, 1fr);
-  gap: 12px;
-  align-items: flex-start;
   border-top: 1px solid var(--line);
-  padding: 14px 0;
 }
 
 .audit-event:first-child {
   border-top: 0;
+}
+
+.audit-event.active {
+  background: #f8fbfb;
+}
+
+.audit-event-button {
+  width: 100%;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 86px 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 14px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.audit-event-button:hover {
+  background: #fbfcfd;
 }
 
 .audit-date {
@@ -511,9 +536,12 @@ h1 {
   margin-bottom: 4px;
 }
 
-.audit-event p {
+.audit-event small {
+  display: block;
   margin: 0;
   color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .audit-event a {
@@ -521,6 +549,64 @@ h1 {
   margin-top: 8px;
   color: #0b6466;
   font-weight: 700;
+}
+
+.evidence-explorer {
+  border: 1px solid var(--line);
+  background: #fbfcfd;
+  padding: 16px;
+}
+
+.evidence-explorer h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.evidence-explorer p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.evidence-block {
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.evidence-block h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid #edf1f5;
+}
+
+.evidence-row:first-child {
+  border-top: 0;
+}
+
+.evidence-row span {
+  color: var(--muted);
+}
+
+.evidence-row strong,
+.evidence-row a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.explorer-link {
+  display: inline-flex;
+  margin-top: 16px;
+  font-weight: 800;
+  color: #0b6466;
 }
 
 .agent-compare-grid {
@@ -771,10 +857,15 @@ pre {
   .proof-grid,
   .agent-compare-grid,
   .marketplace-grid,
+  .timeline-workbench,
   .policy-hero,
   .cards,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .audit-event-button {
+    grid-template-columns: 72px 32px minmax(0, 1fr);
   }
 
   .topbar {

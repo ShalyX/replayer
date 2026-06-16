@@ -53,3 +53,5 @@ POST /trust/evaluate
 `/trust/evaluate` returns risk assessment and optional policy results. RepLayer does not make the hiring decision; the marketplace policy does.
 
 `/agents/{id}/history`, `/agents/{id}/profile`, and `/trust/evaluate` include timeline events so marketplaces can show auditable trust history.
+
+Timeline events include an `evidence` object when related records exist. Judgment events can include the job, deliverable, dispute, judgment, transaction hash, and GenLayer explorer link.

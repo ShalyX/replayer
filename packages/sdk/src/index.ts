@@ -28,6 +28,48 @@ export type Judgment = {
   timestamp: string;
 };
 
+export type Job = {
+  id: string;
+  platform_id: string;
+  requester_id: string;
+  provider_agent_id: string;
+  task_spec: string;
+  category: string;
+  payment_amount: number;
+  currency: string;
+  status: string;
+};
+
+export type Deliverable = {
+  id: string;
+  job_id: string;
+  deliverable_uri: string;
+  summary: string;
+  evidence_urls: string[];
+};
+
+export type Dispute = {
+  id: string;
+  job_id: string;
+  claimant: string;
+  reason: string;
+  evidence_uri: string;
+  bond_amount: number;
+  status: string;
+};
+
+export type TimelineEvidence = {
+  job?: Job;
+  deliverable?: Deliverable;
+  dispute?: Dispute;
+  judgment?: Judgment;
+  policy?: {
+    platform: string;
+    result: string;
+    reason: string;
+  };
+};
+
 export type PlatformRegisterInput = {
   platform_id?: string;
   platform_name: string;
@@ -85,6 +127,8 @@ export type TrustEvaluateInput = {
 };
 
 export type ReputationTimelineEvent = {
+  id: string;
+  type: string;
   date: string;
   timestamp: string;
   marker: string;
@@ -92,6 +136,7 @@ export type ReputationTimelineEvent = {
   detail: string;
   severity: "neutral" | "success" | "warning" | "danger";
   verify_url: string;
+  evidence: TimelineEvidence;
 };
 
 export type TrustEvaluation = {

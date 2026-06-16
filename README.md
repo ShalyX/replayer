@@ -152,6 +152,6 @@ if (!result.policy_result.eligible) {
 
 RepLayer supplies facts, evidence, judgments, risk assessments, and recommendations. Marketplaces own the final policy decision.
 
-The marketplace console and public profile include a reputation timeline, so trust can be audited as a history of jobs, disputes, GenLayer judgments, and policy checks rather than treated as a naked score.
+The marketplace console and public profile include a reputation timeline, so trust can be audited as a history of jobs, disputes, GenLayer judgments, and policy checks rather than treated as a naked score. Each event opens an evidence explorer with the related job, deliverable, dispute, judgment, transaction hash, and GenLayer explorer link when available.
 
 See [docs/integration-guide.md](docs/integration-guide.md) for the longer integration path.

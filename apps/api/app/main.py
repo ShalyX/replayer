@@ -606,6 +606,9 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
     deliverables = db.scalars(select(Deliverable).where(Deliverable.job_id.in_(job_ids))).all() if job_ids else []
     disputes = db.scalars(select(Dispute).where(Dispute.job_id.in_(job_ids))).all() if job_ids else []
     judgments = db.scalars(select(Judgment).where(Judgment.job_id.in_(job_ids))).all() if job_ids else []
+    deliverables_by_job = {deliverable.job_id: deliverable for deliverable in deliverables}
+    disputes_by_job = {dispute.job_id: dispute for dispute in disputes}
+    judgments_by_job = {judgment.job_id: judgment for judgment in judgments}
 
     events = []
     for job in jobs:
@@ -616,12 +619,25 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
                 "Job created",
                 job.task_spec,
                 "neutral",
+                "job_created",
+                evidence_for(job, deliverables_by_job.get(job.id), disputes_by_job.get(job.id), judgments_by_job.get(job.id)),
             )
         )
         if job.status == "accepted":
-            events.append(timeline_event(job.updated_at, "✓", "Job accepted", job.task_spec, "success"))
+            events.append(
+                timeline_event(
+                    job.updated_at,
+                    "✓",
+                    "Job accepted",
+                    job.task_spec,
+                    "success",
+                    "job_accepted",
+                    evidence_for(job, deliverables_by_job.get(job.id), disputes_by_job.get(job.id), judgments_by_job.get(job.id)),
+                )
+            )
 
     for deliverable in deliverables:
+        job = next((item for item in jobs if item.id == deliverable.job_id), None)
         events.append(
             timeline_event(
                 deliverable.submitted_at,
@@ -629,10 +645,13 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
                 "Deliverable submitted",
                 deliverable.summary or deliverable.deliverable_uri,
                 "success",
+                "deliverable_submitted",
+                evidence_for(job, deliverable, disputes_by_job.get(deliverable.job_id), judgments_by_job.get(deliverable.job_id)),
             )
         )
 
     for dispute in disputes:
+        job = next((item for item in jobs if item.id == dispute.job_id), None)
         events.append(
             timeline_event(
                 dispute.opened_at,
@@ -640,10 +659,13 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
                 "Dispute opened",
                 dispute.reason,
                 "warning",
+                "dispute_opened",
+                evidence_for(job, deliverables_by_job.get(dispute.job_id), dispute, judgments_by_job.get(dispute.job_id)),
             )
         )
 
     for judgment in judgments:
+        job = next((item for item in jobs if item.id == judgment.job_id), None)
         is_fraud = judgment.verdict == "fraudulent"
         events.append(
             timeline_event(
@@ -652,6 +674,8 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
                 "Fraudulent judgment recorded on GenLayer" if is_fraud else f"Judgment recorded: {judgment.verdict}",
                 judgment.reasoning_summary,
                 "danger" if is_fraud else "success",
+                "genlayer_judgment",
+                evidence_for(job, deliverables_by_job.get(judgment.job_id), disputes_by_job.get(judgment.job_id), judgment),
                 judgment.verify_url,
             )
         )
@@ -664,6 +688,14 @@ def build_reputation_timeline(db: Session, agent_id: str, policy_event: dict | N
                 f"{policy_event['platform']} {policy_event['title']}",
                 policy_event["detail"],
                 policy_event["severity"],
+                "policy_check",
+                {
+                    "policy": {
+                        "platform": policy_event["platform"],
+                        "result": policy_event["title"].replace("Policy check: ", ""),
+                        "reason": policy_event["detail"],
+                    }
+                },
             )
         )
 
@@ -679,10 +711,14 @@ def timeline_event(
     title: str,
     detail: str,
     severity: str,
+    event_type: str,
+    evidence: dict | None = None,
     verify_url: str = "",
 ) -> dict:
     timestamp = occurred_at.isoformat() if occurred_at else ""
     return {
+        "id": f"{event_type}_{timestamp or 'now'}_{title.lower().replace(' ', '_')}",
+        "type": event_type,
         "date": occurred_at.strftime("%b %d") if occurred_at else "Now",
         "timestamp": timestamp,
         "marker": marker,
@@ -690,8 +726,27 @@ def timeline_event(
         "detail": detail,
         "severity": severity,
         "verify_url": verify_url,
+        "evidence": evidence or {},
         "sort_key": timestamp or "9999-12-31T23:59:59",
     }
+
+
+def evidence_for(
+    job: Job | None = None,
+    deliverable: Deliverable | None = None,
+    dispute: Dispute | None = None,
+    judgment: Judgment | None = None,
+) -> dict:
+    evidence = {}
+    if job:
+        evidence["job"] = job_to_dict(job)
+    if deliverable:
+        evidence["deliverable"] = deliverable_to_dict(deliverable)
+    if dispute:
+        evidence["dispute"] = dispute_to_dict(dispute)
+    if judgment:
+        evidence["judgment"] = judgment_to_dict(judgment)
+    return evidence
 
 
 def reset_demo_data(db: Session) -> dict:
