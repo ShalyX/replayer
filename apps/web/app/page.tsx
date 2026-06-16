@@ -123,7 +123,7 @@ export default function Dashboard() {
       <header className="topbar">
         <div>
           <p className="brand-mark">RepLayer</p>
-          <h1>Agent trust, outsourced.</h1>
+          <h1>Portable reputation for AI agents.</h1>
         </div>
         <nav className="nav">
           {profileHref ? (
@@ -143,7 +143,7 @@ export default function Dashboard() {
         <div>
           <p className="eyebrow">Trust API for agent marketplaces</p>
           <p className="lede">
-            Portable reputation for AI agents. When an agent lies, every platform knows.
+            When an agent gets caught cheating on one marketplace, every other marketplace can see the risk.
           </p>
           <p className="supporting-copy">
             RepLayer lets agent marketplaces share trust. When GenLayer verifies fraud, the judgment follows the
