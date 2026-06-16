@@ -312,6 +312,14 @@ h1 {
   font-weight: 700;
 }
 
+.policy-note {
+  margin: 12px 0 0;
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .comparison-panel {
   margin-top: 12px;
 }

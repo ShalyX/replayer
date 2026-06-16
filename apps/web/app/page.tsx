@@ -104,7 +104,7 @@ export default function Dashboard() {
       setDemo(seeded);
       setProfileHref(nextProfileHref);
       setEvents(seeded.story.events);
-      setStatus("DeepResearchBot was caught lying. Reputation collapsed publicly.");
+      setStatus("DeepResearchBot received a GenLayer-verified fraud judgment. Reputation collapsed publicly.");
     } catch (caught) {
       const message = toErrorMessage(caught);
       setError(message);
@@ -145,8 +145,8 @@ export default function Dashboard() {
             Portable reputation for AI agents. When an agent lies, every platform knows.
           </p>
           <p className="supporting-copy">
-            Replayer lets agent marketplaces share trust. GenLayer records fraudulent work as a verifiable judgment
-            before another platform hires the same agent again.
+            Replayer lets agent marketplaces share trust. When GenLayer verifies fraud, the judgment follows the
+            agent before another platform hires it again.
           </p>
         </div>
         <div className="demo-actions">
@@ -173,7 +173,7 @@ export default function Dashboard() {
           <ol className="collapse-flow">
             <li>Agent earns portable trust</li>
             <li>Buyer disputes fabricated citations</li>
-            <li>GenLayer records the judgment</li>
+            <li>GenLayer verifies a fraud judgment</li>
             <li>Every integrated platform can see the flag</li>
           </ol>
         </section>
@@ -184,7 +184,7 @@ export default function Dashboard() {
           <span className="score-label">Trust Score</span>
           <div className="trust-score">{currentScore}</div>
           <span className="pill bad">{currentStatus}</span>
-          <p>{demo ? "Trust collapsed publicly after a fraudulent verdict." : "Run the demo to generate the live collapse."}</p>
+          <p>{demo ? "Trust collapsed publicly after a GenLayer-verified fraud judgment." : "Run the demo to generate the live collapse."}</p>
         </section>
       </section>
 
@@ -211,6 +211,10 @@ export default function Dashboard() {
             </div>
           </div>
           {judgment?.verify_url ? <a className="proof-link" href={judgment.verify_url} target="_blank" rel="noreferrer">View on Explorer</a> : null}
+          <p className="policy-note">
+            Current demo uses an aggressive scoring policy to illustrate the impact of a fraudulent GenLayer judgment.
+            Future versions will use weighted reputation and risk models.
+          </p>
         </section>
 
         <section className="panel">
@@ -245,7 +249,7 @@ export default function Dashboard() {
             <span className="pill bad">flagged</span>
             <h3>DeepResearchBot</h3>
             <strong>Score: {currentScore}</strong>
-            <p>Fraudulent citations verified by GenLayer.</p>
+            <p>Fraudulent citations verified by a GenLayer judgment.</p>
           </article>
           <article className="agent-choice accepted">
             <span className="pill">verified</span>
@@ -282,7 +286,7 @@ export default function Dashboard() {
               {judgment.verify_url ? <a href={judgment.verify_url} target="_blank" rel="noreferrer">Verify on GenLayer</a> : null}
             </div>
           ) : (
-            <p className="muted">Run the demo to generate a live fraudulent verdict and provenance link.</p>
+            <p className="muted">Run the demo to generate a live GenLayer-verified fraud judgment and provenance link.</p>
           )}
         </section>
       </section>

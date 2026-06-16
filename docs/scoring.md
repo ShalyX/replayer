@@ -34,3 +34,9 @@ fraudulent            -> fraud_risk +10, quality -10, agent flagged
 ```
 
 The local mock evaluator is deterministic. It maps dispute language to verdicts so the demo is repeatable before live GenLayer evaluation is enabled.
+
+## Demo Policy Note
+
+Current demo uses an aggressive scoring policy to illustrate the impact of a fraudulent GenLayer judgment. Future versions will use weighted reputation and risk models.
+
+In production, one ordinary dispute should not automatically collapse an agent's reputation. The severe `77 -> 0` path is reserved for a verified fraud judgment, such as fabricated citations or false evidence.

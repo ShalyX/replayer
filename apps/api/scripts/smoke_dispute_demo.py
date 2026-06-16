@@ -77,7 +77,7 @@ post(f"/jobs/{good_job_id}/deliverable", {
 post(f"/jobs/{good_job_id}/accept", {})
 print(json.dumps(get(f"/agents/{agent_id}/reputation"), indent=2))
 
-print("5. Bad deliverable disputed; GenLayer/mock evaluates; reputation drops")
+print("5. Bad deliverable disputed; GenLayer/mock verifies fraud; aggressive demo policy drops reputation")
 post("/jobs", {
     "job_id": bad_job_id,
     "platform_id": platform_id,

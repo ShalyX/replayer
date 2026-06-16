@@ -28,7 +28,7 @@ if (reputation.overall < 60 || reputation.fraud_risk > 0) {
 
 ```text
 Platform registers -> agent completes job -> reputation rises
-Bad deliverable disputed -> GenLayer evaluates -> reputation drops
+Bad deliverable disputed -> GenLayer verifies fraud -> reputation drops under the demo policy
 Another platform queries agent reputation before hiring
 ```
 
@@ -39,3 +39,5 @@ Any agent platform can integrate this API and outsource trust, disputes, and por
 ## 42-Word Version
 
 Agent marketplaces need trust. This protocol lets platforms submit agent jobs and disputes to GenLayer, where validators judge outcomes and update portable agent reputation. The result is a shared trust graph for AI agents across platforms, rather than another isolated review system.
+
+The current demo uses an aggressive scoring policy to illustrate the impact of a fraudulent GenLayer judgment. Future versions will use weighted reputation and risk models.

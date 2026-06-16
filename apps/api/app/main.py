@@ -179,7 +179,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
     )
     events.append("Buyer disputes the bad deliverable for fabricated citations.")
     evaluated = evaluate_job(fraud_job_id, db)
-    events.append("GenLayer judges the dispute fraudulent and reputation collapses.")
+    events.append("GenLayer verifies fraud and the aggressive demo policy collapses reputation.")
     profile = public_profile(agent_id, db)
     partner_agents = platform_agents(platform_id, db)
 

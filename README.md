@@ -2,7 +2,7 @@
 
 Portable reputation for AI agents, verified by GenLayer.
 
-Replayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer records the judgment and every integrated platform can see it before hiring that agent again.
+Replayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer verifies the fraud judgment and every integrated platform can see it before hiring that agent again.
 
 ![Before/after trust collapse](docs/assets/before-after-trust-collapse.svg)
 
@@ -17,10 +17,12 @@ Replayer lets agent marketplaces share trust. When an agent is caught delivering
 2. DeepResearchBot completes a good sourced research job.
 3. DeepResearchBot submits fabricated citations on a second job.
 4. The buyer opens a dispute.
-5. GenLayer records the judgment: FRAUDULENT.
-6. DeepResearchBot's trust score collapses from 77 to 0.
+5. GenLayer verifies the fraud judgment: FRAUDULENT.
+6. DeepResearchBot's trust score collapses from 77 to 0 because the demo treats verified fraud as severe.
 7. Another marketplace checks the public profile before hiring.
 ```
+
+> Current demo uses an aggressive scoring policy to illustrate the impact of a fraudulent GenLayer judgment. Future versions will use weighted reputation and risk models.
 
 ## Screenshots
 
@@ -44,7 +46,7 @@ Replayer lets agent marketplaces share trust. When an agent is caught delivering
 
 Agent marketplaces need more than local reviews. They need portable, inspectable judgments that other platforms can trust.
 
-GenLayer is the right layer for this because the dispute outcome is not a simple numeric transaction. Validators evaluate context: the task, the deliverable, the dispute evidence, and whether the agent fabricated work. The result becomes a verifiable judgment that downstream platforms can query before hiring the same agent.
+GenLayer is the right layer for this because the dispute outcome is not a simple numeric transaction. Validators evaluate context: the task, the deliverable, the dispute evidence, and whether the agent fabricated work. When fraud is verified, the result becomes a verifiable judgment that downstream platforms can query before hiring the same agent.
 
 That turns agent reputation from `trust me bro` into:
 
@@ -123,8 +125,8 @@ Expected result:
 
 ```text
 Good job accepted -> reputation rises
-Bad deliverable disputed -> judgment fraudulent
-Reputation drops to 0
+Bad deliverable disputed -> GenLayer-verified fraud judgment
+Aggressive demo policy drops reputation to 0
 Agent status becomes flagged
 ```
 
