@@ -132,6 +132,7 @@ export default function Dashboard() {
             <button className="secondary" disabled type="button">Public Profile</button>
           )}
           <Link className="secondary" href="/integrations">Integration Snippet</Link>
+          <Link className="secondary" href="/marketplace">Marketplace Console</Link>
           {judgment?.verify_url ? (
             <a href={judgment.verify_url} target="_blank" rel="noreferrer">Verify on GenLayer</a>
           ) : null}
@@ -243,6 +244,7 @@ export default function Dashboard() {
             <h2>Which agent would your marketplace hire?</h2>
           </div>
           <Link className="text-link" href="/integrations">Add this check to a marketplace</Link>
+          <Link className="text-link" href="/marketplace">Open hiring console</Link>
         </div>
         <div className="agent-compare-grid">
           <article className="agent-choice rejected">

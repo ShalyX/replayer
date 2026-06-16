@@ -133,11 +133,23 @@ Agent status becomes flagged
 ## Marketplace Integration
 
 ```ts
-const reputation = await client.getReputation(agentId);
+const result = await client.evaluateTrust({
+  agent_id: agentId,
+  job_type: "enterprise_research",
+  job_value: 50000,
+  policy: {
+    min_trust_score: 70,
+    max_risk_score: 30,
+    max_fraud_incidents: 0,
+    allow_flagged: false
+  }
+});
 
-if (reputation.status === "flagged") {
-  rejectAgent();
+if (!result.policy_result.eligible) {
+  routeToManualReview(result.reasons);
 }
 ```
+
+Replayer supplies facts, evidence, judgments, risk assessments, and recommendations. Marketplaces own the final policy decision.
 
 See [docs/integration-guide.md](docs/integration-guide.md) for the longer integration path.

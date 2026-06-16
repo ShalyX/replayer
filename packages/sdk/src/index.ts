@@ -70,6 +70,41 @@ export type DisputeInput = {
   bond_amount?: number;
 };
 
+export type TrustPolicy = {
+  min_trust_score?: number;
+  max_risk_score?: number;
+  max_fraud_incidents?: number;
+  allow_flagged?: boolean;
+};
+
+export type TrustEvaluateInput = {
+  agent_id: string;
+  job_type?: string;
+  job_value?: number;
+  policy?: TrustPolicy;
+};
+
+export type TrustEvaluation = {
+  agent_id: string;
+  job_type: string;
+  job_value: number;
+  trust_score: number;
+  risk_score: number;
+  fraud_incidents: number;
+  status: string;
+  recommendation: "low_risk" | "manual_review" | "high_risk";
+  confidence: number;
+  reasons: string[];
+  latest_judgment: Judgment | null;
+  policy_result: {
+    evaluated: boolean;
+    eligible: boolean | null;
+    outcome: "eligible" | "ineligible";
+    reasons: string[];
+    policy: TrustPolicy | null;
+  };
+};
+
 export class AgentReputationClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
@@ -109,6 +144,10 @@ export class AgentReputationClient {
 
   getReputation(agentId: string): Promise<Reputation> {
     return this.request(`/agents/${encodeURIComponent(agentId)}/reputation`, "GET");
+  }
+
+  evaluateTrust(input: TrustEvaluateInput): Promise<TrustEvaluation> {
+    return this.request("/trust/evaluate", "POST", input);
   }
 
   getHistory(agentId: string) {

@@ -10,7 +10,7 @@ from .config import settings
 from .database import Base, engine, get_db
 from .genlayer import GenLayerClient
 from .models import Agent, Deliverable, Dispute, Job, Judgment, Platform, ReputationSnapshot, new_id
-from .schemas import AgentRegister, DeliverableSubmit, DisputeOpen, JobCreate, PlatformRegister
+from .schemas import AgentRegister, DeliverableSubmit, DisputeOpen, JobCreate, PlatformRegister, TrustEvaluateRequest
 from .scoring import apply_deltas, current_snapshot, mock_judgment, score_acceptance, snapshot_dict, verdict_deltas
 
 Base.metadata.create_all(bind=engine)
@@ -461,6 +461,87 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="Unknown agent")
     history = get_history(agent_id, db)
     return {"agent": agent_to_dict(agent), "reputation": snapshot_dict(current_snapshot(db, agent_id)), **history}
+
+
+@app.post("/trust/evaluate", dependencies=[Depends(require_key)])
+def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db)) -> dict:
+    agent = db.get(Agent, payload.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+
+    reputation = current_snapshot(db, payload.agent_id)
+    reputation_data = snapshot_dict(reputation)
+    judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
+    fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
+    fraud_incidents = len(fraud_judgments)
+    risk_score = min(
+        100,
+        reputation.fraud_risk * 8
+        + reputation.valid_dispute_count * 15
+        + fraud_incidents * 45
+        + (20 if reputation.status == "flagged" else 0),
+    )
+
+    reasons = []
+    if fraud_incidents:
+        reasons.append("Fraudulent judgment recorded on GenLayer")
+    if reputation.status == "flagged":
+        reasons.append("Flagged status")
+    if reputation.overall < 70:
+        reasons.append("Trust score below common marketplace threshold")
+    if risk_score > 70:
+        reasons.append("High computed risk score")
+    if payload.job_value >= 10000:
+        reasons.append("High-value job requires stricter marketplace policy")
+
+    if fraud_incidents or reputation.status == "flagged" or risk_score >= 70:
+        recommendation = "high_risk"
+        confidence = 0.94
+    elif reputation.overall < 70 or reputation.valid_dispute_count:
+        recommendation = "manual_review"
+        confidence = 0.82
+    else:
+        recommendation = "low_risk"
+        confidence = 0.88
+
+    policy = payload.policy
+    policy_reasons = []
+    eligible = True
+    if policy:
+        if reputation.overall < policy.min_trust_score:
+            eligible = False
+            policy_reasons.append(f"Trust score below policy minimum of {policy.min_trust_score}")
+        if risk_score > policy.max_risk_score:
+            eligible = False
+            policy_reasons.append(f"Risk score above policy maximum of {policy.max_risk_score}")
+        if fraud_incidents > policy.max_fraud_incidents:
+            eligible = False
+            policy_reasons.append("Fraud incident count exceeds policy")
+        if reputation.status == "flagged" and not policy.allow_flagged:
+            eligible = False
+            policy_reasons.append("Policy does not allow flagged agents")
+
+    latest_fraud = fraud_judgments[-1] if fraud_judgments else None
+    return {
+        "agent_id": payload.agent_id,
+        "job_type": payload.job_type,
+        "job_value": payload.job_value,
+        "trust_score": reputation.overall,
+        "risk_score": risk_score,
+        "fraud_incidents": fraud_incidents,
+        "status": reputation.status,
+        "recommendation": recommendation,
+        "confidence": confidence,
+        "reasons": reasons or ["No material risk signals found"],
+        "latest_judgment": judgment_to_dict(latest_fraud) if latest_fraud else None,
+        "policy_result": {
+            "evaluated": policy is not None,
+            "eligible": eligible if policy else None,
+            "outcome": "eligible" if eligible else "ineligible",
+            "reasons": policy_reasons,
+            "policy": policy.model_dump() if policy else None,
+        },
+    }
 
 
 def require_job(db: Session, job_id: str) -> Job:

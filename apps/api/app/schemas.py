@@ -69,3 +69,17 @@ class JudgmentOut(BaseModel):
     tx_hash: str = ""
     verify_url: str = ""
     timestamp: str = ""
+
+
+class TrustPolicy(BaseModel):
+    min_trust_score: int = 70
+    max_risk_score: int = 30
+    max_fraud_incidents: int = 0
+    allow_flagged: bool = False
+
+
+class TrustEvaluateRequest(BaseModel):
+    agent_id: str
+    job_type: str = "research"
+    job_value: float = 0
+    policy: TrustPolicy | None = None
