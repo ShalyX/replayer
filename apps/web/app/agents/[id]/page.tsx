@@ -28,7 +28,7 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
     <main className="shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Public Agent Profile</p>
+          <p className="brand-mark">RepLayer</p>
           <h1>{profile.agent.name}</h1>
         </div>
         <nav className="nav">

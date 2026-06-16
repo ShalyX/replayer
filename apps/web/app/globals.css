@@ -92,6 +92,14 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.brand-mark {
+  margin: 0 0 8px;
+  color: #0b6466;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
 h1,
 h2,
 h3,

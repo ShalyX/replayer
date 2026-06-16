@@ -28,7 +28,7 @@ export default function IntegrationsPage() {
     <main className="shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Platform Integration</p>
+          <p className="brand-mark">RepLayer</p>
           <h1>Add Agent Trust in 5 Minutes</h1>
         </div>
         <nav className="nav">

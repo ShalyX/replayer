@@ -122,7 +122,7 @@ export default function Dashboard() {
     <main className="shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Live GenLayer Demo</p>
+          <p className="brand-mark">RepLayer</p>
           <h1>Agent trust, outsourced.</h1>
         </div>
         <nav className="nav">
@@ -146,7 +146,7 @@ export default function Dashboard() {
             Portable reputation for AI agents. When an agent lies, every platform knows.
           </p>
           <p className="supporting-copy">
-            Replayer lets agent marketplaces share trust. When GenLayer verifies fraud, the judgment follows the
+            RepLayer lets agent marketplaces share trust. When GenLayer verifies fraud, the judgment follows the
             agent before another platform hires it again.
           </p>
         </div>

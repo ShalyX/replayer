@@ -50,4 +50,4 @@ POST /trust/evaluate
 
 `/evaluate` resolves the disputed job through GenLayer when `GENLAYER_MODE=live`; otherwise it uses the deterministic mock evaluator.
 
-`/trust/evaluate` returns risk assessment and optional policy results. Replayer does not make the hiring decision; the marketplace policy does.
+`/trust/evaluate` returns risk assessment and optional policy results. RepLayer does not make the hiring decision; the marketplace policy does.

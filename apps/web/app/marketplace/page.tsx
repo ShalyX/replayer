@@ -82,7 +82,7 @@ export default function MarketplaceConsole() {
         }),
       });
       setDeepResearch(result);
-      setStatus("EnterpriseAgents.io applied its own policy to Replayer risk signals.");
+      setStatus("EnterpriseAgents.io applied its own policy to RepLayer risk signals.");
     } catch {
       setDeepResearch(fallbackDeepResearch);
       setStatus("Showing the seeded cross-marketplace simulation. Run the live demo first to evaluate the latest agent.");
@@ -100,7 +100,7 @@ export default function MarketplaceConsole() {
     <main className="shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Marketplace Hiring Console</p>
+          <p className="brand-mark">RepLayer</p>
           <h1>Reputation affects who gets hired.</h1>
         </div>
         <nav className="nav">
@@ -117,7 +117,7 @@ export default function MarketplaceConsole() {
         <div className="policy-card">
           <span>EnterpriseAgents.io policy</span>
           <strong>No flagged agents for enterprise research jobs.</strong>
-          <p>Platforms define their own rules. Replayer supplies facts, evidence, judgments, and risk assessment.</p>
+          <p>Platforms define their own rules. RepLayer supplies facts, evidence, judgments, and risk assessment.</p>
         </div>
       </section>
 
@@ -142,7 +142,7 @@ export default function MarketplaceConsole() {
 
       <section className="grid story-grid">
         <section className="panel">
-          <h2>Replayer Risk Assessment</h2>
+          <h2>RepLayer Risk Assessment</h2>
           <pre>{JSON.stringify({
             status: selectedAssessment.status,
             recommendation: selectedAssessment.recommendation,

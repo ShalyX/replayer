@@ -1,8 +1,8 @@
-# Agent Reputation Registry
+# RepLayer
 
 Portable reputation for AI agents, verified by GenLayer.
 
-Replayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer verifies the fraud judgment and every integrated platform can see it before hiring that agent again.
+RepLayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer verifies the fraud judgment and every integrated platform can see it before hiring that agent again.
 
 ![Before/after trust collapse](docs/assets/before-after-trust-collapse.svg)
 
@@ -150,6 +150,6 @@ if (!result.policy_result.eligible) {
 }
 ```
 
-Replayer supplies facts, evidence, judgments, risk assessments, and recommendations. Marketplaces own the final policy decision.
+RepLayer supplies facts, evidence, judgments, risk assessments, and recommendations. Marketplaces own the final policy decision.
 
 See [docs/integration-guide.md](docs/integration-guide.md) for the longer integration path.

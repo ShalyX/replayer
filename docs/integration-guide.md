@@ -45,7 +45,7 @@ The current demo uses an aggressive scoring policy to illustrate the impact of a
 
 ## Policy Engine
 
-Replayer should not be the hiring manager. It provides facts, evidence, judgments, risk assessments, and recommendations. Each marketplace defines its own policy.
+RepLayer should not be the hiring manager. It provides facts, evidence, judgments, risk assessments, and recommendations. Each marketplace defines its own policy.
 
 ```ts
 const result = await client.evaluateTrust({
