@@ -18,3 +18,5 @@ apps/web/.next/
 apps/web/next-dev-*.log
 apps/api/uvicorn*.log
 apps/api/replayer_dev.db
+
+.vercel
