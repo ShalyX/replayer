@@ -93,11 +93,28 @@ button:disabled {
 }
 
 .brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 8px;
   color: #0b6466;
   font-size: 15px;
   font-weight: 900;
   letter-spacing: 0;
+}
+
+.brand-mark::before {
+  content: "R";
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: var(--ink);
+  border-top: 3px solid var(--accent);
+  border-bottom: 3px solid var(--accent);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
 }
 
 h1,
@@ -850,6 +867,22 @@ pre {
   padding: 14px;
 }
 
+.site-footer {
+  width: min(1320px, calc(100vw - 32px));
+  margin: 0 auto 24px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.site-footer a {
+  color: #0b6466;
+}
+
 @media (max-width: 920px) {
   .grid,
   .hero-band,
@@ -870,6 +903,10 @@ pre {
 
   .topbar {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .site-footer {
     flex-direction: column;
   }
 }

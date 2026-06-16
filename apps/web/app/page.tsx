@@ -133,6 +133,7 @@ export default function Dashboard() {
           )}
           <Link className="secondary" href="/integrations">Integration Snippet</Link>
           <Link className="secondary" href="/marketplace">Marketplace Console</Link>
+          <a className="secondary" href="https://github.com/ShalyX/replayer" target="_blank" rel="noreferrer">GitHub</a>
           {judgment?.verify_url ? (
             <a href={judgment.verify_url} target="_blank" rel="noreferrer">Verify on GenLayer</a>
           ) : null}

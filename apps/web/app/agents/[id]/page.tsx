@@ -37,6 +37,7 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
         <nav className="nav">
           <Link className="secondary" href="/">Dashboard</Link>
           <Link className="secondary" href="/integrations">Integration</Link>
+          <a className="secondary" href="https://github.com/ShalyX/replayer" target="_blank" rel="noreferrer">GitHub</a>
           {profile.judgments.find((judgment) => judgment.verify_url) ? (
             <a href={profile.judgments.find((judgment) => judgment.verify_url)?.verify_url} target="_blank" rel="noreferrer">
               Verify on GenLayer

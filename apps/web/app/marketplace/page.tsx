@@ -299,6 +299,7 @@ export default function MarketplaceConsole() {
         <nav className="nav">
           <Link className="secondary" href="/">Dashboard</Link>
           <Link className="secondary" href="/integrations">SDK</Link>
+          <a className="secondary" href="https://github.com/ShalyX/replayer" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
       </header>
 

@@ -34,6 +34,7 @@ export default function IntegrationsPage() {
         <nav className="nav">
           <Link className="secondary" href="/">Dashboard</Link>
           <Link className="secondary" href="/marketplace">Marketplace Console</Link>
+          <a className="secondary" href="https://github.com/ShalyX/replayer" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
       </header>
       <section className="grid">
