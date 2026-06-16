@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-label="Before and after trust collapse">
+  <rect width="1200" height="640" fill="#f6f7f9"/>
+  <text x="64" y="72" font-family="Inter,Segoe UI,Arial" font-size="34" font-weight="800" fill="#1f2933">Before/after trust collapse</text>
+  <text x="64" y="108" font-family="Inter,Segoe UI,Arial" font-size="18" fill="#667085">DeepResearchBot gets caught delivering fraudulent work.</text>
+  <rect x="64" y="150" width="310" height="360" fill="#fff" stroke="#d8dee8"/>
+  <rect x="64" y="150" width="310" height="5" fill="#0f8b8d"/>
+  <text x="92" y="205" font-family="Inter,Segoe UI,Arial" font-size="15" font-weight="700" fill="#667085">BEFORE THE LIE</text>
+  <text x="92" y="246" font-family="Inter,Segoe UI,Arial" font-size="30" font-weight="800" fill="#1f2933">DeepResearchBot</text>
+  <text x="92" y="294" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#667085">TRUST SCORE</text>
+  <text x="92" y="386" font-family="Inter,Segoe UI,Arial" font-size="96" font-weight="900" fill="#1f2933">77</text>
+  <rect x="92" y="414" width="86" height="30" fill="#eef6f6"/>
+  <text x="112" y="435" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#0b6466">verified</text>
+  <text x="92" y="476" font-family="Inter,Segoe UI,Arial" font-size="16" fill="#667085">Completed research job with credible sources.</text>
+  <rect x="445" y="150" width="310" height="360" fill="#fbfcfd" stroke="#d8dee8"/>
+  <text x="473" y="205" font-family="Inter,Segoe UI,Arial" font-size="15" font-weight="700" fill="#667085">FRAUDULENT CITATION SUBMITTED</text>
+  <text x="473" y="248" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#1f2933">GenLayer Judgment</text>
+  <text x="473" y="288" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="900" fill="#b3264a">FRAUDULENT</text>
+  <line x1="500" y1="332" x2="712" y2="332" stroke="#d8dee8" stroke-width="4"/>
+  <circle cx="500" cy="332" r="12" fill="#0f8b8d"/>
+  <circle cx="571" cy="332" r="12" fill="#0f8b8d"/>
+  <circle cx="642" cy="332" r="12" fill="#b3264a"/>
+  <circle cx="712" cy="332" r="12" fill="#b3264a"/>
+  <text x="473" y="385" font-family="Inter,Segoe UI,Arial" font-size="17" fill="#1f2933">1. Buyer disputes fabricated citations</text>
+  <text x="473" y="422" font-family="Inter,Segoe UI,Arial" font-size="17" fill="#1f2933">2. Validators record judgment</text>
+  <text x="473" y="459" font-family="Inter,Segoe UI,Arial" font-size="17" fill="#1f2933">3. Portable reputation updates</text>
+  <rect x="826" y="150" width="310" height="360" fill="#fff" stroke="#d8dee8"/>
+  <rect x="826" y="150" width="310" height="5" fill="#b3264a"/>
+  <text x="854" y="205" font-family="Inter,Segoe UI,Arial" font-size="15" font-weight="700" fill="#667085">AFTER JUDGMENT</text>
+  <text x="854" y="246" font-family="Inter,Segoe UI,Arial" font-size="30" font-weight="800" fill="#1f2933">DeepResearchBot</text>
+  <text x="854" y="294" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#667085">TRUST SCORE</text>
+  <text x="854" y="386" font-family="Inter,Segoe UI,Arial" font-size="96" font-weight="900" fill="#b3264a">0</text>
+  <rect x="854" y="414" width="82" height="30" fill="#fde8ee"/>
+  <text x="872" y="435" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#b3264a">flagged</text>
+  <text x="854" y="476" font-family="Inter,Segoe UI,Arial" font-size="16" fill="#667085">Every integrated platform can see the flag.</text>
+</svg>

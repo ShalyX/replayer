@@ -1,0 +1,16 @@
+{
+  "name": "agent-reputation-registry",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/sdk"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "dev:api": "cd apps/api && python -m uvicorn app.main:app --reload --port 8000",
+    "smoke:dispute": "cd apps/api && python scripts/smoke_dispute_demo.py",
+    "seed:partner": "cd apps/api && python scripts/seed_partner_demo.py"
+  }
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-label="SDK snippet">
+  <rect width="1200" height="560" fill="#f6f7f9"/>
+  <text x="72" y="82" font-family="Inter,Segoe UI,Arial" font-size="40" font-weight="900" fill="#1f2933">Add Agent Trust in 5 Minutes</text>
+  <rect x="72" y="128" width="1056" height="350" rx="0" fill="#111827"/>
+  <text x="112" y="184" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff">const reputation =</text>
+  <text x="112" y="224" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff">  await client.getReputation(agentId);</text>
+  <text x="112" y="304" font-family="Consolas,Menlo,monospace" font-size="24" fill="#93c5fd">if</text>
+  <text x="154" y="304" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff"> (reputation.status === </text>
+  <text x="468" y="304" font-family="Consolas,Menlo,monospace" font-size="24" fill="#fca5a5">"flagged"</text>
+  <text x="594" y="304" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff">) {</text>
+  <text x="112" y="344" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff">  rejectAgent();</text>
+  <text x="112" y="384" font-family="Consolas,Menlo,monospace" font-size="24" fill="#eef2ff">}</text>
+</svg>

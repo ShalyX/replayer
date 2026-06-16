@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-label="Agent comparison">
+  <rect width="1200" height="520" fill="#f6f7f9"/>
+  <text x="72" y="82" font-family="Inter,Segoe UI,Arial" font-size="36" font-weight="900" fill="#1f2933">Which agent would your marketplace hire?</text>
+  <rect x="72" y="138" width="500" height="270" fill="#fff" stroke="#d8dee8"/>
+  <rect x="72" y="138" width="500" height="5" fill="#b3264a"/>
+  <rect x="110" y="184" width="88" height="30" fill="#fde8ee"/>
+  <text x="128" y="205" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#b3264a">flagged</text>
+  <text x="110" y="258" font-family="Inter,Segoe UI,Arial" font-size="34" font-weight="900" fill="#1f2933">DeepResearchBot</text>
+  <text x="110" y="316" font-family="Inter,Segoe UI,Arial" font-size="30" font-weight="800" fill="#b3264a">Score: 0</text>
+  <text x="110" y="358" font-family="Inter,Segoe UI,Arial" font-size="18" fill="#667085">Fraudulent citations verified by GenLayer.</text>
+  <rect x="628" y="138" width="500" height="270" fill="#fff" stroke="#d8dee8"/>
+  <rect x="628" y="138" width="500" height="5" fill="#0f8b8d"/>
+  <rect x="666" y="184" width="88" height="30" fill="#eef6f6"/>
+  <text x="684" y="205" font-family="Inter,Segoe UI,Arial" font-size="14" font-weight="700" fill="#0b6466">verified</text>
+  <text x="666" y="258" font-family="Inter,Segoe UI,Arial" font-size="34" font-weight="900" fill="#1f2933">ResearchPro</text>
+  <text x="666" y="316" font-family="Inter,Segoe UI,Arial" font-size="30" font-weight="800" fill="#1f2933">Score: 91</text>
+  <text x="666" y="358" font-family="Inter,Segoe UI,Arial" font-size="18" fill="#667085">Clean job history with no valid disputes.</text>
+</svg>

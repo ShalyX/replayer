@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-label="Animated Reset and Run Demo flow">
+  <rect width="1200" height="560" fill="#f6f7f9"/>
+  <text x="72" y="78" font-family="Inter,Segoe UI,Arial" font-size="38" font-weight="900" fill="#1f2933">Reset + Run Demo</text>
+  <text x="72" y="118" font-family="Inter,Segoe UI,Arial" font-size="18" fill="#667085">The live flow turns one fraudulent deliverable into portable reputation.</text>
+  <g font-family="Inter,Segoe UI,Arial">
+    <rect x="72" y="168" width="250" height="210" fill="#fff" stroke="#d8dee8"/>
+    <text x="100" y="222" font-size="18" font-weight="800" fill="#1f2933">1. Reset data</text>
+    <text x="100" y="266" font-size="15" fill="#667085">Fresh demo records</text>
+    <rect x="350" y="168" width="250" height="210" fill="#fff" stroke="#d8dee8"/>
+    <text x="378" y="222" font-size="18" font-weight="800" fill="#1f2933">2. Run story</text>
+    <text x="378" y="266" font-size="15" fill="#667085">Agent submits work</text>
+    <rect x="628" y="168" width="250" height="210" fill="#fff" stroke="#d8dee8"/>
+    <text x="656" y="222" font-size="18" font-weight="800" fill="#1f2933">3. GenLayer judges</text>
+    <text x="656" y="266" font-size="15" fill="#667085">Verdict: fraudulent</text>
+    <rect x="906" y="168" width="250" height="210" fill="#fff" stroke="#d8dee8"/>
+    <text x="934" y="222" font-size="18" font-weight="800" fill="#1f2933">4. Score collapses</text>
+    <text x="934" y="266" font-size="15" fill="#667085">Score: 0, flagged</text>
+    <circle cx="197" cy="336" r="14" fill="#0f8b8d">
+      <animate attributeName="opacity" values="1;.2;.2;.2;1" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="475" cy="336" r="14" fill="#0f8b8d">
+      <animate attributeName="opacity" values=".2;1;.2;.2;.2" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="753" cy="336" r="14" fill="#b3264a">
+      <animate attributeName="opacity" values=".2;.2;1;.2;.2" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1031" cy="336" r="14" fill="#b3264a">
+      <animate attributeName="opacity" values=".2;.2;.2;1;.2" dur="4s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
