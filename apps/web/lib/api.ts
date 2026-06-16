@@ -29,7 +29,10 @@ async function readableError(res: Response): Promise<string> {
   }
   return message
     .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
-    .replace(/\*{4,}/g, "[hidden]")
+    .replace(/[?√âˆš]*\s*Enter password to decrypt keystore:\s*(?:\[hidden\]|\*|\s)*/gi, "")
+    .replace(/Write Transaction Hash:\s*(0x[a-fA-F0-9]{64})/g, "Tx: $1")
+    .replace(/Error:\s*UnknownRpcError:[\s\S]*/g, "GenLayer RPC timed out during readback.")
+    .replace(/\*{2,}/g, "[hidden]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 900);

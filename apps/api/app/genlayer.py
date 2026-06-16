@@ -46,6 +46,15 @@ class GenLayerClient:
             return {"mode": "mock", "method": method, "tx_id": f"mock-{method}"}
         output = self._run(["write", self.contract_address, method, "--args", *[str(arg) for arg in args]], password=True)
         tx_id = self._parse_tx_hash(output)
+        if tx_id and self._rpc_fetch_failed(output):
+            return {
+                "mode": "live",
+                "method": method,
+                "tx_id": tx_id,
+                "contract_address": self.contract_address,
+                "verify_url": self.verify_url(tx_id),
+                "warning": "GenLayer transaction was submitted, but RPC readback timed out.",
+            }
         if self._accepted_receipt(output) and tx_id:
             return {
                 "mode": "live",
@@ -116,6 +125,10 @@ class GenLayerClient:
         if "TypeError:" in output or "Exception:" in output:
             return True
         return GenLayerClient._leader_execution_result(output) == "ERROR"
+
+    @staticmethod
+    def _rpc_fetch_failed(output: str) -> bool:
+        return "fetch failed" in output or "UnknownRpcError" in output or "UND_ERR_CONNECT_TIMEOUT" in output
 
     @staticmethod
     def _accepted_receipt(output: str) -> bool:

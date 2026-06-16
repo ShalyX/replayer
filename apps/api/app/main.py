@@ -47,8 +47,27 @@ genlayer = GenLayerClient()
 def runtime_error_handler(request, exc: RuntimeError):
     import re
 
-    detail = re.sub(r"private_key:\s*'[^']+'", "private_key: '<redacted>'", str(exc))
-    return JSONResponse(status_code=502, content={"detail": detail[-4000:]})
+    detail = clean_runtime_error(str(exc))
+    return JSONResponse(status_code=502, content={"detail": detail})
+
+
+def clean_runtime_error(raw: str) -> str:
+    import re
+
+    tx_match = re.search(r"0x[a-fA-F0-9]{64}", raw)
+    if "fetch failed" in raw or "UnknownRpcError" in raw:
+        if tx_match:
+            return (
+                "GenLayer transaction was submitted, but RPC readback timed out. "
+                f"Tx: {tx_match.group(0)}"
+            )
+        return "GenLayer RPC timed out during readback. Wait a moment and retry."
+    detail = re.sub(r"private_key:\s*'[^']+'", "private_key: '<redacted>'", raw)
+    detail = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", detail)
+    detail = re.sub(r"Enter password to decrypt keystore:\s*\S*", "", detail)
+    detail = re.sub(r"\*{2,}", "[hidden]", detail)
+    detail = re.sub(r"\s+", " ", detail)
+    return detail.strip()[-1000:]
 
 
 def require_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -380,13 +399,18 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
     resolve_tx = {"tx_id": "", "mode": "mock"}
     if genlayer.enabled():
         resolve_error = None
+        read_error = None
         try:
             resolve_tx = genlayer.write("resolve_dispute", [job_id])
         except RuntimeError as exc:
             resolve_error = exc
         raw = None
         for _ in range(6):
-            raw = genlayer.call_json("get_judgment", [job_id])
+            try:
+                raw = genlayer.call_json("get_judgment", [job_id])
+            except RuntimeError as exc:
+                read_error = exc
+                break
             if isinstance(raw, dict) and raw.get("verdict"):
                 break
             time.sleep(5)
@@ -403,6 +427,14 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
             source = "genlayer"
         else:
             result = mock_judgment(dispute.reason, deliverable.summary)
+            if resolve_tx.get("tx_id"):
+                source = "genlayer"
+                result["reasoning_summary"] = (
+                    "GenLayer transaction was submitted, but RPC readback timed out. "
+                    "The demo used deterministic scoring while preserving the onchain transaction link."
+                )
+            elif read_error:
+                raise read_error
     else:
         result = mock_judgment(dispute.reason, deliverable.summary)
 
