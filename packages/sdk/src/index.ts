@@ -77,6 +77,26 @@ export type PlatformRegisterInput = {
   webhook_url?: string;
 };
 
+export type Platform = {
+  id: string;
+  name: string;
+  owner_wallet: string;
+  webhook_url: string;
+};
+
+export type PlatformRegisterResult = {
+  platform: Platform;
+  api_key: string;
+  api_key_warning: string;
+  tx: unknown;
+};
+
+export type PlatformApiKeyResult = {
+  platform: Platform;
+  api_key: string;
+  api_key_warning: string;
+};
+
 export type AgentRegisterInput = {
   agent_id?: string;
   platform_id: string;
@@ -170,8 +190,16 @@ export class AgentReputationClient {
     this.apiKey = apiKey;
   }
 
-  registerPlatform(input: PlatformRegisterInput) {
+  registerPlatform(input: PlatformRegisterInput): Promise<PlatformRegisterResult> {
     return this.request("/platforms/register", "POST", input);
+  }
+
+  rotatePlatformApiKey(platformId: string): Promise<PlatformApiKeyResult> {
+    return this.request(`/platforms/${encodeURIComponent(platformId)}/api-key`, "POST", {});
+  }
+
+  checkAuth(): Promise<{ ok: boolean; type: "admin" | "platform"; platform_id: string | null }> {
+    return this.request("/auth/check", "GET");
   }
 
   registerAgent(input: AgentRegisterInput) {

@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import secrets
 import time
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -28,6 +31,9 @@ def ensure_dev_columns() -> None:
         }.items():
             if name not in existing:
                 conn.exec_driver_sql(ddl)
+        platform_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(platforms)").fetchall()}
+        if "api_key_hash" not in platform_columns:
+            conn.exec_driver_sql("ALTER TABLE platforms ADD COLUMN api_key_hash VARCHAR(160) DEFAULT ''")
 
 
 ensure_dev_columns()
@@ -41,6 +47,7 @@ app.add_middleware(
 )
 
 genlayer = GenLayerClient()
+ADMIN_AUTH = {"type": "admin", "platform_id": None}
 
 
 @app.exception_handler(RuntimeError)
@@ -70,9 +77,50 @@ def clean_runtime_error(raw: str) -> str:
     return detail.strip()[-1000:]
 
 
-def require_key(x_api_key: str | None = Header(default=None)) -> None:
-    if settings.api_key and x_api_key != settings.api_key:
+def admin_key() -> str:
+    return settings.admin_api_key or settings.api_key
+
+
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def generate_api_key() -> str:
+    return f"rpl_test_{secrets.token_urlsafe(32)}"
+
+
+def authenticate_key(x_api_key: str | None, db: Session) -> dict:
+    if not x_api_key:
         raise HTTPException(status_code=401, detail="Invalid or missing x-api-key")
+    configured_admin_key = admin_key()
+    if configured_admin_key and hmac.compare_digest(x_api_key, configured_admin_key):
+        return {"type": "admin", "platform_id": None}
+    key_hash = hash_api_key(x_api_key)
+    platform = db.scalars(select(Platform).where(Platform.api_key_hash == key_hash, Platform.active.is_(True))).first()
+    if platform:
+        return {"type": "platform", "platform_id": platform.id}
+    raise HTTPException(status_code=401, detail="Invalid or missing x-api-key")
+
+
+def get_auth(x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict:
+    return authenticate_key(x_api_key, db)
+
+
+def require_key(auth: dict = Depends(get_auth)) -> None:
+    return None
+
+
+def require_admin_key(x_api_key: str | None = Header(default=None)) -> None:
+    configured_admin_key = admin_key()
+    if not configured_admin_key or not x_api_key or not hmac.compare_digest(x_api_key, configured_admin_key):
+        raise HTTPException(status_code=401, detail="Admin API key required")
+
+
+def authorize_platform(auth: dict, platform_id: str) -> None:
+    if auth.get("type") == "admin":
+        return
+    if auth.get("platform_id") != platform_id:
+        raise HTTPException(status_code=403, detail="API key is not authorized for this platform")
 
 
 @app.get("/health")
@@ -87,6 +135,12 @@ def health(db: Session = Depends(get_db)) -> dict:
             "jobs": db.scalar(select(func.count()).select_from(Job)),
         },
     }
+
+
+@app.get("/auth/check")
+def auth_check(x_api_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict:
+    auth = authenticate_key(x_api_key, db)
+    return {"ok": True, **auth}
 
 
 @app.post("/demo/reset", dependencies=[Depends(require_key)])
@@ -133,6 +187,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             metadata_uri="https://researchagents.example/agents/deepresearchbot.json",
         ),
         db,
+        ADMIN_AUTH,
     )
     events.append("DeepResearchBot registers with research and citation capabilities.")
 
@@ -148,6 +203,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             currency="USDC",
         ),
         db,
+        ADMIN_AUTH,
     )
     submit_deliverable(
         good_job_id,
@@ -158,8 +214,9 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             evidence_urls=["https://example.com/source-good"],
         ),
         db,
+        ADMIN_AUTH,
     )
-    accepted = accept_job(good_job_id, db)
+    accepted = accept_job(good_job_id, db, ADMIN_AUTH)
     events.append("Good research job is accepted, so reputation rises.")
 
     create_job(
@@ -174,6 +231,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             currency="USDC",
         ),
         db,
+        ADMIN_AUTH,
     )
     submit_deliverable(
         fraud_job_id,
@@ -184,6 +242,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             evidence_urls=["https://example.com/source-bad"],
         ),
         db,
+        ADMIN_AUTH,
     )
     open_dispute(
         fraud_job_id,
@@ -195,9 +254,10 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             bond_amount=10,
         ),
         db,
+        ADMIN_AUTH,
     )
     events.append("Buyer disputes the bad deliverable for fabricated citations.")
-    evaluated = evaluate_job(fraud_job_id, db)
+    evaluated = evaluate_job(fraud_job_id, db, ADMIN_AUTH)
     events.append("GenLayer verifies fraud and the aggressive demo policy collapses reputation.")
     profile = public_profile(agent_id, db)
     partner_agents = platform_agents(platform_id, db)
@@ -235,26 +295,49 @@ def platform_agents(platform_id: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
-@app.post("/platforms/register", dependencies=[Depends(require_key)])
+@app.post("/platforms/register", dependencies=[Depends(require_admin_key)])
 def register_platform(payload: PlatformRegister, db: Session = Depends(get_db)) -> dict:
     platform_id = payload.platform_id or new_id("platform")
     if db.get(Platform, platform_id):
         raise HTTPException(status_code=409, detail="Platform already exists")
     tx = genlayer.write("register_platform", [platform_id, payload.platform_name, payload.webhook_url])
+    api_key = generate_api_key()
     platform = Platform(
         id=platform_id,
         name=payload.platform_name,
         owner_wallet=payload.owner_wallet,
         webhook_url=payload.webhook_url,
+        api_key_hash=hash_api_key(api_key),
     )
     db.add(platform)
     db.commit()
     db.refresh(platform)
-    return {"platform": platform_to_dict(platform), "tx": tx}
+    return {
+        "platform": platform_to_dict(platform),
+        "api_key": api_key,
+        "api_key_warning": "Store this key now. RepLayer only stores its hash and cannot show it again.",
+        "tx": tx,
+    }
 
 
-@app.post("/agents/register", dependencies=[Depends(require_key)])
-def register_agent(payload: AgentRegister, db: Session = Depends(get_db)) -> dict:
+@app.post("/platforms/{platform_id}/api-key", dependencies=[Depends(require_admin_key)])
+def rotate_platform_api_key(platform_id: str, db: Session = Depends(get_db)) -> dict:
+    platform = db.get(Platform, platform_id)
+    if not platform:
+        raise HTTPException(status_code=404, detail="Unknown platform")
+    api_key = generate_api_key()
+    platform.api_key_hash = hash_api_key(api_key)
+    db.commit()
+    return {
+        "platform": platform_to_dict(platform),
+        "api_key": api_key,
+        "api_key_warning": "Store this key now. Existing platform keys for this platform are revoked.",
+    }
+
+
+@app.post("/agents/register")
+def register_agent(payload: AgentRegister, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    authorize_platform(auth, payload.platform_id)
     if not db.get(Platform, payload.platform_id):
         raise HTTPException(status_code=404, detail="Unknown platform")
     agent_id = payload.agent_id or new_id("agent")
@@ -285,8 +368,9 @@ def register_agent(payload: AgentRegister, db: Session = Depends(get_db)) -> dic
     return {"agent": agent_to_dict(agent), "tx": tx}
 
 
-@app.post("/jobs", dependencies=[Depends(require_key)])
-def create_job(payload: JobCreate, db: Session = Depends(get_db)) -> dict:
+@app.post("/jobs")
+def create_job(payload: JobCreate, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    authorize_platform(auth, payload.platform_id)
     if not db.get(Platform, payload.platform_id):
         raise HTTPException(status_code=404, detail="Unknown platform")
     if not db.get(Agent, payload.provider_agent_id):
@@ -323,9 +407,15 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)) -> dict:
     return {"job": job_to_dict(job), "tx": tx}
 
 
-@app.post("/jobs/{job_id}/deliverable", dependencies=[Depends(require_key)])
-def submit_deliverable(job_id: str, payload: DeliverableSubmit, db: Session = Depends(get_db)) -> dict:
+@app.post("/jobs/{job_id}/deliverable")
+def submit_deliverable(
+    job_id: str,
+    payload: DeliverableSubmit,
+    db: Session = Depends(get_db),
+    auth: dict = Depends(get_auth),
+) -> dict:
     job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
     if job.status != "created":
         raise HTTPException(status_code=409, detail="Job is not accepting deliverables")
     deliverable_id = payload.deliverable_id or new_id("deliv")
@@ -347,9 +437,10 @@ def submit_deliverable(job_id: str, payload: DeliverableSubmit, db: Session = De
     return {"deliverable": deliverable_to_dict(deliverable), "tx": tx}
 
 
-@app.post("/jobs/{job_id}/accept", dependencies=[Depends(require_key)])
-def accept_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+@app.post("/jobs/{job_id}/accept")
+def accept_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
     job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
     if job.status != "submitted":
         raise HTTPException(status_code=409, detail="Job is not submitted")
     tx = genlayer.write("accept_job", [job_id])
@@ -359,9 +450,10 @@ def accept_job(job_id: str, db: Session = Depends(get_db)) -> dict:
     return {"job": job_to_dict(job), "reputation": snapshot_dict(snapshot), "tx": tx}
 
 
-@app.post("/jobs/{job_id}/dispute", dependencies=[Depends(require_key)])
-def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db)) -> dict:
+@app.post("/jobs/{job_id}/dispute")
+def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
     job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
     if job.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted jobs can be disputed")
     dispute_id = payload.dispute_id or new_id("disp")
@@ -385,9 +477,10 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
     return {"dispute": dispute_to_dict(dispute), "tx": tx}
 
 
-@app.post("/jobs/{job_id}/evaluate", dependencies=[Depends(require_key)])
-def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+@app.post("/jobs/{job_id}/evaluate")
+def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
     job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
     dispute = db.scalars(select(Dispute).where(Dispute.job_id == job_id)).first()
     deliverable = db.scalars(select(Deliverable).where(Deliverable.job_id == job_id)).first()
     if not dispute or not deliverable:
@@ -405,7 +498,7 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
         except RuntimeError as exc:
             resolve_error = exc
         raw = None
-        for _ in range(6):
+        for _ in range(settings.genlayer_read_attempts):
             try:
                 raw = genlayer.call_json("get_judgment", [job_id])
             except RuntimeError as exc:
@@ -413,7 +506,7 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db)) -> dict:
                 break
             if isinstance(raw, dict) and raw.get("verdict"):
                 break
-            time.sleep(5)
+            time.sleep(settings.genlayer_read_interval_seconds)
         if not (isinstance(raw, dict) and raw.get("verdict")) and resolve_error:
             if "Job is not disputed" not in str(resolve_error) and "Job already evaluated" not in str(resolve_error):
                 raise resolve_error

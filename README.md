@@ -78,10 +78,12 @@ Key settings:
 ```bash
 DATABASE_URL=postgresql+psycopg://replayer:replayer@localhost:5432/replayer
 API_KEY=dev-key
+ADMIN_API_KEY=dev-key
 GENLAYER_MODE=mock
 GENLAYER_CONTRACT_ADDRESS=0x59a8924E6E7D3A460e2154a304fCC2BEfEc3c8Dd
 GENLAYER_EXPLORER_BASE_URL=https://explorer-studio.genlayer.com/tx
 NEXT_PUBLIC_API_BASE=http://localhost:8000
+NEXT_PUBLIC_API_KEY=dev-key
 ```
 
 Use `GENLAYER_MODE=live` when you want disputes to call the deployed contract.
@@ -131,6 +133,12 @@ Agent status becomes flagged
 ```
 
 ## Marketplace Integration
+
+For the test phase, start with:
+
+- [Test phase quickstart](docs/test-phase-quickstart.md)
+- [Test phase deployment](docs/test-phase-deployment.md)
+- [Reputation scoring policy](docs/scoring-policy.md)
 
 ```ts
 const result = await client.evaluateTrust({

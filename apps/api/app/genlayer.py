@@ -34,7 +34,7 @@ class GenLayerClient:
             text=True,
             capture_output=True,
             check=False,
-            timeout=240,
+            timeout=settings.genlayer_command_timeout_seconds,
         )
         output = f"{completed.stdout}\n{completed.stderr}"
         if (

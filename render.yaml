@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: replayer-api
+    runtime: python
+    plan: free
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /health
+    buildCommand: pip install -r apps/api/requirements.txt
+    startCommand: cd apps/api && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: replayer-postgres
+          property: connectionString
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: GENLAYER_MODE
+        value: mock
+      - key: GENLAYER_CONTRACT_ADDRESS
+        sync: false
+      - key: GENLAYER_ACCOUNT_PASSWORD
+        sync: false
+      - key: GENLAYER_EXPLORER_BASE_URL
+        value: https://explorer-studio.genlayer.com/tx
+      - key: GENLAYER_COMMAND_TIMEOUT_SECONDS
+        value: "240"
+      - key: GENLAYER_READ_ATTEMPTS
+        value: "6"
+      - key: GENLAYER_READ_INTERVAL_SECONDS
+        value: "5"
+
+databases:
+  - name: replayer-postgres
+    databaseName: replayer
+    user: replayer
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList: []

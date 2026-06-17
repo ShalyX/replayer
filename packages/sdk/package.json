@@ -1,9 +1,24 @@
 {
   "name": "@agent-reputation-registry/sdk",
   "version": "0.1.0",
+  "description": "RepLayer SDK for portable AI agent reputation.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShalyX/replayer.git",
+    "directory": "packages/sdk"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

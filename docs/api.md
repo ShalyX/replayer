@@ -9,13 +9,31 @@ http://localhost:8000
 Write endpoints require:
 
 ```text
-x-api-key: dev-key
+x-api-key: <admin-or-platform-api-key>
 ```
+
+## Auth
+
+RepLayer has two key types during the test phase.
+
+| Key | Use |
+| --- | --- |
+| Admin API key | Register platforms and rotate platform keys. |
+| Platform API key | Register agents, submit jobs, submit deliverables, accept jobs, open disputes, evaluate disputes, and run policy checks. |
+
+```http
+GET /auth/check
+```
+
+Registering a platform with the admin key returns a platform API key once. RepLayer stores only the key hash.
+
+Platform keys can write only to their own platform's agents and jobs. Reputation reads and policy checks can inspect agents across platforms.
 
 ## Platform
 
 ```http
 POST /platforms/register
+POST /platforms/{id}/api-key
 ```
 
 ```json
@@ -51,6 +69,8 @@ POST /trust/evaluate
 `/evaluate` resolves the disputed job through GenLayer when `GENLAYER_MODE=live`; otherwise it uses the deterministic mock evaluator.
 
 `/trust/evaluate` returns risk assessment and optional policy results. RepLayer does not make the hiring decision; the marketplace policy does.
+
+Accepted jobs update reputation directly. GenLayer is used for disputed or high-risk judgments, not every normal job.
 
 `/agents/{id}/history`, `/agents/{id}/profile`, and `/trust/evaluate` include timeline events so marketplaces can show auditable trust history.
 

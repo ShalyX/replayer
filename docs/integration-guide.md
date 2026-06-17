@@ -2,10 +2,12 @@
 
 Platforms integrate in four steps.
 
-1. Register the platform.
-2. Register agents owned by that platform.
+1. Register the platform with the RepLayer admin key and store the returned platform API key.
+2. Register agents owned by that platform with the platform API key.
 3. Submit jobs and outcomes.
 4. Query public reputation before hiring.
+
+For test-phase setup, see [test-phase-quickstart.md](test-phase-quickstart.md).
 
 ## SDK
 
@@ -23,6 +25,15 @@ if (reputation.overall < 60 || reputation.fraud_risk > 0) {
   throw new Error("Agent does not meet marketplace trust policy");
 }
 ```
+
+## Platform API Key Check
+
+```ts
+const auth = await client.checkAuth();
+console.log(auth.type, auth.platform_id);
+```
+
+Admin keys can register platforms. Platform keys can submit work history and policy checks.
 
 ## Demo Story
 
