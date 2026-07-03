@@ -6,8 +6,15 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from .config import settings
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+def database_url() -> str:
+    if settings.database_url.startswith("postgresql://"):
+        return settings.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return settings.database_url
+
+
+DATABASE_URL = database_url()
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
