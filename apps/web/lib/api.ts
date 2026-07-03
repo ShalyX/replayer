@@ -1,16 +1,30 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "dev-key";
+const isProduction = process.env.NODE_ENV === "production";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || (isProduction ? "" : "http://localhost:8000");
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || (isProduction ? "" : "dev-key");
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": API_KEY,
-      ...(init.headers || {}),
-    },
-  });
+  if (!API_BASE) {
+    throw new Error("RepLayer API is not configured. Set NEXT_PUBLIC_API_BASE in Vercel and redeploy.");
+  }
+  if (!API_KEY) {
+    throw new Error("RepLayer API key is not configured. Set NEXT_PUBLIC_API_KEY in Vercel and redeploy.");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": API_KEY,
+        ...(init.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error(`Unable to reach RepLayer API at ${API_BASE}. Check NEXT_PUBLIC_API_BASE and API availability.`);
+  }
+
   if (!res.ok) {
     const message = await readableError(res);
     throw new Error(message);

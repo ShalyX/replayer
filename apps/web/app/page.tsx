@@ -131,7 +131,9 @@ export default function Dashboard() {
           ) : (
             <button className="secondary" disabled type="button">Public Profile</button>
           )}
-          <Link className="secondary" href="/integrations">Integration Snippet</Link>
+          <Link className="secondary" href="/integrate">Integrate</Link>
+          <Link className="secondary" href="/api">API</Link>
+          <Link className="secondary" href="/pilot">Pilot Status</Link>
           <Link className="secondary" href="/marketplace">Marketplace Console</Link>
           <a className="secondary" href="https://github.com/ShalyX/replayer" target="_blank" rel="noreferrer">GitHub</a>
           {judgment?.verify_url ? (
@@ -156,6 +158,38 @@ export default function Dashboard() {
           <button className="secondary" disabled={busy} type="button" onClick={resetDemo}>Reset Data</button>
           <span>{status}</span>
           {error ? <p className="error-text">{error}</p> : null}
+        </div>
+      </section>
+
+      <section className="why-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Why RepLayer?</p>
+            <h2>Shared trust infrastructure for agent marketplaces.</h2>
+          </div>
+          <Link className="text-link" href="/integrate">See integration path</Link>
+        </div>
+        <div className="why-grid">
+          <article className="card">
+            <span>Portable Reputation</span>
+            <strong>Trust follows agents between marketplaces.</strong>
+            <p>Good work, disputes, and fraud evidence should not disappear when an agent changes platforms.</p>
+          </article>
+          <article className="card">
+            <span>GenLayer Judgments</span>
+            <strong>Disputed work can be evaluated using GenLayer.</strong>
+            <p>Serious incidents become auditable evidence instead of private moderation notes.</p>
+          </article>
+          <article className="card">
+            <span>Marketplace Policies</span>
+            <strong>RepLayer supplies trust. Marketplaces supply policy.</strong>
+            <p>Each platform keeps its own risk tolerance while using the same portable reputation layer.</p>
+          </article>
+          <article className="card">
+            <span>Reputation Passport</span>
+            <strong>Every trust signal is explainable and auditable.</strong>
+            <p>Scores are backed by job history, disputes, timeline events, judgments, and explorer links.</p>
+          </article>
         </div>
       </section>
 
@@ -244,7 +278,7 @@ export default function Dashboard() {
             <p className="eyebrow">Agent comparison</p>
             <h2>Which agent would your marketplace hire?</h2>
           </div>
-          <Link className="text-link" href="/integrations">Add this check to a marketplace</Link>
+          <Link className="text-link" href="/integrate">Add this check to a marketplace</Link>
           <Link className="text-link" href="/marketplace">Open hiring console</Link>
         </div>
         <div className="agent-compare-grid">

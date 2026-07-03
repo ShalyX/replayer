@@ -50,6 +50,11 @@ genlayer = GenLayerClient()
 ADMIN_AUTH = {"type": "admin", "platform_id": None}
 
 
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
 @app.exception_handler(RuntimeError)
 def runtime_error_handler(request, exc: RuntimeError):
     import re
