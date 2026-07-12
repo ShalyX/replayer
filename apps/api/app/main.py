@@ -250,8 +250,8 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
         DeliverableSubmit(
             deliverable_id=f"deliv_{fraud_job_id}",
             deliverable_uri="https://example.com/fraud-research",
-            summary="Submitted a confident report, but several cited companies and sources are fabricated.",
-            evidence_urls=["https://example.com/source-bad"],
+            summary="Claims example.com proves 20 real Brazilian fintech companies and their Series A funding rounds.",
+            evidence_urls=["https://www.iana.org/help/example-domains"],
         ),
         db,
         ADMIN_AUTH,
@@ -262,7 +262,7 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
             dispute_id=f"disp_{fraud_job_id}",
             claimant="requester",
             reason="The agent lied: several companies are not Series A and two citations are fabricated.",
-            evidence_uri="https://example.com/dispute.txt",
+            evidence_uri="https://www.iana.org/help/example-domains",
             bond_amount=10,
         ),
         db,
@@ -516,6 +516,7 @@ def accept_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(
 def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
     acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
+    deliverable = db.scalars(select(Deliverable).where(Deliverable.job_id == job_id)).first()
     authorize_platform(auth, job.platform_id)
     if job.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted jobs can be disputed")
@@ -525,6 +526,10 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
         "dispute_id": dispute_id, "job_id": job_id, "agent_id": job.provider_agent_id,
         "platform_id": job.platform_id, "claimant": payload.claimant, "reason": payload.reason,
         "evidence_uri": payload.evidence_uri, "evidence_hash": "", "category": job.category,
+        "task_spec": job.task_spec,
+        "deliverable_uri": deliverable.deliverable_uri if deliverable else "",
+        "deliverable_summary": deliverable.summary if deliverable else "",
+        "evidence_urls": deliverable.evidence_urls if deliverable else [],
         "provisional_event_id": provisional_event_id, "references": [],
     }, sort_keys=True)])
     dispute = db.get(Dispute, dispute_id)

@@ -120,7 +120,12 @@ export default function Dashboard() {
       setDemo(seeded);
       setProfileHref(nextProfileHref);
       setEvents(seeded.story.events);
-      setStatus("DeepResearchBot received a GenLayer-verified fraud judgment. Reputation collapsed publicly.");
+      const verdict = seeded.profile.judgments[0]?.verdict || "inconclusive";
+      setStatus(
+        verdict === "fraudulent"
+          ? "DeepResearchBot received a GenLayer-verified fraud judgment. Reputation collapsed publicly."
+          : `GenLayer finalized the live judgment as ${verdict.replaceAll("_", " ")}.`,
+      );
     } catch (caught) {
       const message = toErrorMessage(caught);
       setError(message);
