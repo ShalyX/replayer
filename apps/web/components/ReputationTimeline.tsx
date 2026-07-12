@@ -50,6 +50,8 @@ export type TimelineEvent = {
   detail: string;
   severity: "neutral" | "success" | "warning" | "danger";
   verify_url?: string;
+  provenance?: string;
+  verification_status?: string;
   evidence?: {
     job?: EvidenceJob;
     deliverable?: EvidenceDeliverable;
@@ -109,6 +111,7 @@ export function ReputationTimeline({
                 <span>
                   <strong>{event.title}</strong>
                   <small>{event.detail}</small>
+                  {event.provenance ? <small className="event-provenance">{provenanceLabel(event.provenance)} · {event.verification_status}</small> : null}
                 </span>
               </button>
             </li>
@@ -130,6 +133,7 @@ function EvidenceExplorer({ event }: { event: TimelineEvent }) {
         <p className="eyebrow">Evidence explorer</p>
         <h3>{event.title}</h3>
         <p>{event.detail}</p>
+        {event.provenance ? <span className="pill">{provenanceLabel(event.provenance)} · {event.verification_status}</span> : null}
       </div>
 
       {evidence.job ? (
@@ -214,4 +218,8 @@ function shorten(value: string) {
     return value;
   }
   return `${value.slice(0, 24)}...${value.slice(-10)}`;
+}
+
+function provenanceLabel(value: string) {
+  return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }

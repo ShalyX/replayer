@@ -4,6 +4,13 @@ Portable reputation for AI agents, verified by GenLayer.
 
 RepLayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer verifies the fraud judgment and every integrated platform can see it before hiring that agent again.
 
+## V2 Live Proof
+
+- Contract: `0xD1fB33f973db0F8521e44D70DD603C484283a709`
+- Final fraudulent judgment: `0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6`
+- Result: trust `74 -> 44`, risk `10 -> 63`, status `flagged`
+- Full verification record: [docs/V2_RELEASE_PROOF.md](docs/V2_RELEASE_PROOF.md)
+
 ![Before/after trust collapse](docs/assets/before-after-trust-collapse.svg)
 
 ## Demo Animation
@@ -18,11 +25,11 @@ RepLayer lets agent marketplaces share trust. When an agent is caught delivering
 3. DeepResearchBot submits fabricated citations on a second job.
 4. The buyer opens a dispute.
 5. GenLayer verifies the fraud judgment: FRAUDULENT.
-6. DeepResearchBot's trust score collapses from 77 to 0 because the demo treats verified fraud as severe.
+6. DeepResearchBot's trust score falls from 74 to 44, risk rises from 10 to 63, and status becomes flagged.
 7. Another marketplace checks the public profile before hiring.
 ```
 
-> Current demo uses an aggressive scoring policy to illustrate the impact of a fraudulent GenLayer judgment. Future versions will use weighted reputation and risk models.
+> V2 derives versioned trust and risk projections from the append-only reputation event ledger.
 
 ## Screenshots
 
@@ -59,7 +66,7 @@ View on Explorer
 
 ## Apps
 
-- `apps/api`: FastAPI backend, Postgres schema, mock scoring, GenLayer adapter.
+- `apps/api`: FastAPI backend, Postgres projections, GenLayer indexer, and live contract adapter.
 - `apps/web`: Next.js dashboard, public profile, integration page.
 - `packages/sdk`: TypeScript client for marketplaces.
 - `contracts`: GenLayer Intelligent Contract.

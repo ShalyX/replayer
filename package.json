@@ -11,6 +11,11 @@
     "build:web": "npm --workspace apps/web run build",
     "dev:api": "cd apps/api && python -m uvicorn app.main:app --reload --port 8000",
     "smoke:dispute": "cd apps/api && python scripts/smoke_dispute_demo.py",
-    "seed:partner": "cd apps/api && python scripts/seed_partner_demo.py"
+    "seed:partner": "cd apps/api && python scripts/seed_partner_demo.py",
+    "indexer:start": "cd apps/api && python scripts/indexer_service.py",
+    "indexer:once": "cd apps/api && python scripts/indexer_service.py --once",
+    "projections:rebuild": "cd apps/api && python scripts/projections_rebuild.py",
+    "ledger:verify": "cd apps/api && python scripts/ledger_verify.py",
+    "ledger:rebuild-test": "cd apps/api && python scripts/ledger_rebuild_test.py"
   }
 }

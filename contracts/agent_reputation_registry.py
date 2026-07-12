@@ -12,16 +12,6 @@ class AgentReputationRegistry(gl.Contract):
     deliverables: TreeMap[str, str]
     disputes: TreeMap[str, str]
     judgments: TreeMap[str, str]
-    delivery_reliability: TreeMap[str, i256]
-    research_accuracy: TreeMap[str, i256]
-    citation_quality: TreeMap[str, i256]
-    completion_rate: TreeMap[str, i256]
-    dispute_count: TreeMap[str, i256]
-    valid_dispute_count: TreeMap[str, i256]
-    fraud_risk: TreeMap[str, i256]
-    platform_verified_jobs: TreeMap[str, i256]
-    genlayer_verified_jobs: TreeMap[str, i256]
-    agent_status: TreeMap[str, str]
 
     def __init__(self):
         pass
@@ -54,16 +44,6 @@ class AgentReputationRegistry(gl.Contract):
             "metadata_uri": metadata_uri,
             "status": "active",
         }, sort_keys=True)
-        self.delivery_reliability[agent_id] = 0
-        self.research_accuracy[agent_id] = 0
-        self.citation_quality[agent_id] = 0
-        self.completion_rate[agent_id] = 0
-        self.dispute_count[agent_id] = 0
-        self.valid_dispute_count[agent_id] = 0
-        self.fraud_risk[agent_id] = 0
-        self.platform_verified_jobs[agent_id] = 0
-        self.genlayer_verified_jobs[agent_id] = 0
-        self.agent_status[agent_id] = "active"
 
     @gl.public.write
     def create_job(self, job_id: str, platform_id: str, requester_id: str, provider_agent_id: str, task_spec: str, category: str, payment_amount: str, currency: str) -> None:
@@ -106,10 +86,6 @@ class AgentReputationRegistry(gl.Contract):
         self._require_platform_owner(str(job["platform_id"]))
         if str(job["status"]) != "submitted":
             raise Exception("Job is not submitted")
-        agent_id = str(job["provider_agent_id"])
-        self.delivery_reliability[agent_id] += 1
-        self.completion_rate[agent_id] += 1
-        self.platform_verified_jobs[agent_id] += 1
         job["status"] = "accepted"
         self.jobs[job_id] = json.dumps(job, sort_keys=True)
 
@@ -128,8 +104,6 @@ class AgentReputationRegistry(gl.Contract):
             "bond_amount": bond_amount,
             "status": "open",
         }, sort_keys=True)
-        agent_id = str(job["provider_agent_id"])
-        self.dispute_count[agent_id] += 1
         job["status"] = "disputed"
         self.jobs[job_id] = json.dumps(job, sort_keys=True)
 
@@ -143,9 +117,6 @@ class AgentReputationRegistry(gl.Contract):
         if str(dispute["status"]) != "open":
             raise Exception("Dispute is not open")
         judgment = self._evaluate_research_dispute(job, deliverable, dispute)
-        agent_id = str(job["provider_agent_id"])
-        category = str(job["category"])
-        self._apply_judgment(agent_id, category, judgment)
         dispute["status"] = "resolved"
         self.disputes[job_id] = json.dumps(dispute, sort_keys=True)
         self.judgments[job_id] = json.dumps(judgment, sort_keys=True)
@@ -176,22 +147,6 @@ class AgentReputationRegistry(gl.Contract):
     def get_judgment(self, job_id: str) -> str:
         return self.judgments.get(job_id, "")
 
-    @gl.public.view
-    def get_reputation(self, agent_id: str) -> str:
-        return json.dumps({
-            "agent_id": agent_id,
-            "delivery_reliability": int(self.delivery_reliability[agent_id]),
-            "research_accuracy": int(self.research_accuracy[agent_id]),
-            "citation_quality": int(self.citation_quality[agent_id]),
-            "completion_rate": int(self.completion_rate[agent_id]),
-            "dispute_count": int(self.dispute_count[agent_id]),
-            "valid_dispute_count": int(self.valid_dispute_count[agent_id]),
-            "fraud_risk": int(self.fraud_risk[agent_id]),
-            "platform_verified_jobs": int(self.platform_verified_jobs[agent_id]),
-            "genlayer_verified_jobs": int(self.genlayer_verified_jobs[agent_id]),
-            "status": self.agent_status[agent_id],
-        }, sort_keys=True)
-
     def _require_platform_owner(self, platform_id: str) -> None:
         if platform_id not in self.platforms:
             raise Exception("Unknown platform")
@@ -207,10 +162,6 @@ class AgentReputationRegistry(gl.Contract):
         return json.loads(value)
 
     def _evaluate_research_dispute(self, job, deliverable, dispute):
-        fast_judgment = self._deterministic_research_judgment(dispute)
-        if fast_judgment["verdict"] != "inconclusive":
-            return fast_judgment
-
         def evaluate() -> str:
             deliverable_text = gl.get_webpage(str(deliverable["deliverable_url"]), mode="text")
             dispute_evidence = ""
@@ -222,29 +173,6 @@ class AgentReputationRegistry(gl.Contract):
             parsed = json.loads(result)
             return json.dumps(self._normalize_judgment(parsed), sort_keys=True)
         return json.loads(gl.eq_principle_strict_eq(evaluate))
-
-    def _deterministic_research_judgment(self, dispute):
-        reason = str(dispute["reason"]).lower()
-        if "fabricated" in reason or "fake citation" in reason or "agent lied" in reason or "lied" in reason:
-            return {
-                "verdict": "fraudulent",
-                "confidence_bps": 9000,
-                "reasoning_summary": "Dispute evidence states that the research deliverable used fabricated citations or false claims.",
-                "score_deltas": self._default_deltas_for_verdict("fraudulent"),
-            }
-        if "not series a" in reason or "wrong companies" in reason:
-            return {
-                "verdict": "failed",
-                "confidence_bps": 8200,
-                "reasoning_summary": "Dispute evidence states that core entries failed the requested research criteria.",
-                "score_deltas": self._default_deltas_for_verdict("failed"),
-            }
-        return {
-            "verdict": "inconclusive",
-            "confidence_bps": 0,
-            "reasoning_summary": "",
-            "score_deltas": self._default_deltas_for_verdict("inconclusive"),
-        }
 
     def _evaluation_prompt(self, job, deliverable, dispute, deliverable_text: str, dispute_evidence: str, source_notes: str) -> str:
         return (
@@ -290,39 +218,4 @@ class AgentReputationRegistry(gl.Contract):
             "verdict": verdict,
             "confidence_bps": confidence_bps,
             "reasoning_summary": str(raw.get("reasoning_summary", ""))[:1200],
-            "score_deltas": self._default_deltas_for_verdict(verdict),
         }
-
-    def _default_deltas_for_verdict(self, verdict: str):
-        if verdict == "satisfied":
-            return self._deltas(2, 2, 2, 1, 0, 0)
-        if verdict == "partially_satisfied":
-            return self._deltas(0, -1, -1, 1, 0, 0)
-        if verdict == "failed":
-            return self._deltas(-3, -3, -3, 0, 1, 0)
-        if verdict == "fraudulent":
-            return self._deltas(-5, -10, -10, 0, 1, 10)
-        return self._deltas(0, 0, 0, 0, 0, 0)
-
-    def _deltas(self, reliability: int, accuracy: int, citations: int, completion: int, valid_disputes: int, fraud: int):
-        return {
-            "delivery_reliability": reliability,
-            "research_accuracy": accuracy,
-            "citation_quality": citations,
-            "completion_rate": completion,
-            "valid_dispute_count": valid_disputes,
-            "fraud_risk": fraud,
-        }
-
-    def _apply_judgment(self, agent_id: str, category: str, judgment) -> None:
-        deltas = judgment["score_deltas"]
-        self.delivery_reliability[agent_id] += int(deltas.get("delivery_reliability", 0))
-        self.completion_rate[agent_id] += int(deltas.get("completion_rate", 0))
-        self.valid_dispute_count[agent_id] += int(deltas.get("valid_dispute_count", 0))
-        self.fraud_risk[agent_id] += int(deltas.get("fraud_risk", 0))
-        self.genlayer_verified_jobs[agent_id] += 1
-        if category == "research":
-            self.research_accuracy[agent_id] += int(deltas.get("research_accuracy", 0))
-            self.citation_quality[agent_id] += int(deltas.get("citation_quality", 0))
-        if str(judgment["verdict"]) == "fraudulent":
-            self.agent_status[agent_id] = "flagged"

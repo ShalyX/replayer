@@ -13,6 +13,51 @@ export type Reputation = {
   status: string;
 };
 
+export type EventProvenance = "platform_reported" | "counterparty_confirmed" | "genlayer_provisional" | "genlayer_verified" | "challenged" | "superseded";
+export type VerificationStatus = "pending" | "provisional" | "finalized" | "appealed" | "superseded";
+
+export type ReputationEvent = {
+  event_id: string;
+  event_type: string;
+  agent_id: string;
+  platform_id: string;
+  job_id: string | null;
+  dispute_id: string | null;
+  counterparty_id: string | null;
+  category: string | null;
+  provenance: EventProvenance;
+  verification_status: VerificationStatus;
+  evidence_uri: string | null;
+  evidence_hash: string | null;
+  references: string[];
+  contract_address: string | null;
+  transaction_hash: string | null;
+  block_number: number | null;
+  occurred_at: string;
+  indexed_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ReputationProjection = {
+  agent_id: string;
+  projection: string;
+  projection_version: string;
+  trust_score: number;
+  risk_score: number;
+  status: string;
+  completed_jobs: number;
+  successful_jobs: number;
+  disputes: number;
+  fraud_incidents: number;
+  calculated_at: string;
+};
+
+export type GenLayerJudgment = Judgment & {
+  source: "genlayer";
+  contract_address: string;
+  tx_hash: string;
+};
+
 export type Judgment = {
   id: string;
   job_id: string;
@@ -227,7 +272,24 @@ export class AgentReputationClient {
   }
 
   getReputation(agentId: string): Promise<Reputation> {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation`, "GET");
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v1`, "GET");
+  }
+
+  getAgentEvents(agentId: string, options: { limit?: number } = {}): Promise<{ agent_id: string; events: ReputationEvent[] }> {
+    const limit = options.limit ?? 100;
+    return this.request(`/agents/${encodeURIComponent(agentId)}/events?limit=${limit}`, "GET");
+  }
+
+  getReputationEvent(eventId: string): Promise<ReputationEvent> {
+    return this.request(`/events/${encodeURIComponent(eventId)}`, "GET");
+  }
+
+  getAgentReputation(agentId: string, projection = "research_trust_v1"): Promise<ReputationProjection> {
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=${encodeURIComponent(projection)}`, "GET");
+  }
+
+  getIndexerHealth(): Promise<{ status: string; contract_address: string; last_processed_block: number; last_sync_at: string | null; lag: number }> {
+    return this.request("/health/indexer", "GET");
   }
 
   evaluateTrust(input: TrustEvaluateInput): Promise<TrustEvaluation> {

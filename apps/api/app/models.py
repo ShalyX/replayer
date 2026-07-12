@@ -133,3 +133,80 @@ class ReputationSnapshot(Base):
 
     agent: Mapped[Agent] = relationship()
     job: Mapped[Job] = relationship()
+
+
+class ReputationEvent(Base):
+    __tablename__ = "reputation_events"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("rep_evt_row"))
+    event_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    platform_id: Mapped[str] = mapped_column(ForeignKey("platforms.id"), nullable=False, index=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
+    dispute_id: Mapped[str | None] = mapped_column(ForeignKey("disputes.id"), nullable=True, index=True)
+    counterparty_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    provenance: Mapped[str] = mapped_column(String(40), nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    evidence_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_hash: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contract_address: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    transaction_hash: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    block_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    indexed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    event_metadata: Mapped[dict] = mapped_column("metadata", JsonType, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReputationEventReference(Base):
+    __tablename__ = "reputation_event_references"
+    __table_args__ = (UniqueConstraint("event_id", "referenced_event_id", "relationship_type", name="uq_event_reference"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("rep_ref"))
+    event_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    referenced_event_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    relationship_type: Mapped[str] = mapped_column(String(40), default="references")
+
+
+class IndexerCheckpoint(Base):
+    __tablename__ = "indexer_checkpoints"
+
+    contract_address: Mapped[str] = mapped_column(String(80), primary_key=True)
+    last_processed_block: Mapped[int] = mapped_column(Integer, default=0)
+    last_processed_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectionVersion(Base):
+    __tablename__ = "projection_versions"
+    __table_args__ = (UniqueConstraint("projection_name", "version", name="uq_projection_version"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("projection_version"))
+    projection_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    configuration: Mapped[dict] = mapped_column(JsonType, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AgentReputationProjection(Base):
+    __tablename__ = "agent_reputation_projections"
+    __table_args__ = (UniqueConstraint("agent_id", "projection_name", "projection_version", name="uq_agent_projection"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("projection"))
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    projection_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    projection_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    trust_score: Mapped[int] = mapped_column(Integer, default=70)
+    risk_score: Mapped[int] = mapped_column(Integer, default=10)
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    completed_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    successful_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    disputes: Mapped[int] = mapped_column(Integer, default=0)
+    fraud_incidents: Mapped[int] = mapped_column(Integer, default=0)
+    last_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    details: Mapped[dict] = mapped_column(JsonType, default=dict)

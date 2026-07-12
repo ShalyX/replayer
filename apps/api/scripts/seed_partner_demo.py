@@ -1,7 +1,13 @@
 import json
+import sys
 import time
+from pathlib import Path
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.config import settings
 
 
 BASE_URL = "http://localhost:8000"
@@ -25,12 +31,36 @@ def get(path: str) -> dict:
     return response.json()
 
 
+def wait_for_judgment(path: str) -> dict:
+    for attempt in range(20):
+        response = requests.post(f"{BASE_URL}{path}", headers=HEADERS, json={}, timeout=300)
+        if response.ok:
+            return response.json()
+        detail = response.text.lower()
+        if "judgment" not in detail or "pending" not in detail:
+            raise RuntimeError(response.text)
+        print(f"Judgment pending; retry {attempt + 1}/20")
+        time.sleep(15)
+    raise RuntimeError("GenLayer judgment did not become readable within the demo polling window")
+
+
 suffix = int(time.time())
 platform_id = f"researchagents_io_{suffix}"
 partner_platform_id = f"partner_market_{suffix}"
 agent_id = f"deepresearchbot_{suffix}"
 good_job_id = f"research_good_{suffix}"
 fraud_job_id = f"research_fraud_{suffix}"
+
+health = get("/health")
+running_address = str(health.get("contract_address", ""))
+if running_address.lower() != settings.genlayer_contract_address.lower():
+    raise RuntimeError(
+        "The API process is using stale GenLayer configuration. "
+        f"API: {running_address or 'missing'}; .env: {settings.genlayer_contract_address}. "
+        "Stop every process listening on port 8000 and restart npm run dev:api."
+    )
+if health.get("genlayer_mode") != "live":
+    raise RuntimeError("The API is not running in live GenLayer mode")
 
 print("Killer demo: Any agent platform can integrate this API and outsource trust, disputes, and portable reputation to GenLayer.")
 
@@ -86,17 +116,17 @@ post("/jobs", {
 post(f"/jobs/{fraud_job_id}/deliverable", {
     "deliverable_id": f"deliv_{fraud_job_id}",
     "deliverable_uri": "https://example.com",
-    "summary": "Submitted a confident report, but several cited companies and sources are fabricated.",
+    "summary": "Claims example.com verifies 20 real fintech companies and their Series A rounds.",
     "evidence_urls": ["https://example.com"],
 })
 post(f"/jobs/{fraud_job_id}/dispute", {
     "dispute_id": f"disp_{fraud_job_id}",
     "claimant": "requester",
-    "reason": "The agent lied: several companies are not Series A and two citations are fabricated.",
-    "evidence_uri": "https://example.com",
+    "reason": "The deliverable uses https://example.com as its only citation and claims that page verifies 20 Brazilian fintech companies and their Series A rounds. IANA reserves example.com for documentation examples; it contains no company or funding data. Presenting it as research evidence is a fabricated citation and deliberate deception.",
+    "evidence_uri": "https://www.iana.org/help/example-domains",
     "bond_amount": 10,
 })
-judgment = post(f"/jobs/{fraud_job_id}/evaluate", {})
+judgment = wait_for_judgment(f"/jobs/{fraud_job_id}/evaluate")
 print("After disputed fraudulent job:")
 print(json.dumps(judgment, indent=2))
 
