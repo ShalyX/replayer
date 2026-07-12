@@ -535,11 +535,8 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
     dispute.evidence_uri = payload.evidence_uri
     dispute.bond_amount = payload.bond_amount
     job.status = "disputed"
-    append_event(db, event_type="DISPUTE_OPENED", agent_id=job.provider_agent_id, platform_id=job.platform_id,
-                 job_id=job.id, dispute_id=dispute.id, counterparty_id=payload.claimant,
-                 category=job.category, provenance="platform_reported", verification_status="pending",
-                 evidence_uri=payload.evidence_uri, transaction_hash=tx.get("tx_id") or None,
-                 metadata={"reason": payload.reason, "provisional_event_id": provisional_event_id})
+    # The contract's JUDGMENT_PROVISIONAL event is the canonical dispute-bearing
+    # ledger entry. Keeping a second local event would create a competing writer.
     rebuild_projection(db, job.provider_agent_id)
     db.commit()
     db.refresh(dispute)
