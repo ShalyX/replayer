@@ -129,9 +129,18 @@ def rebuild_projection(db: Session, agent_id: str) -> AgentReputationProjection:
     ]
     trust, risk = 70, 10
     completed = successful = disputes = fraud = 0
+    counted_disputes: set[str] = set()
     verified_platforms: set[str] = set()
     last_finalized = None
     for event in events:
+        if (
+            event.dispute_id
+            and event.dispute_id not in counted_disputes
+            and event.event_type in {"DISPUTE_OPENED", "JUDGMENT_PROVISIONAL", "JUDGMENT_FINALIZED"}
+        ):
+            risk += 8
+            disputes += 1
+            counted_disputes.add(event.dispute_id)
         if event.event_type == "JOB_ACCEPTED":
             trust += 4
             completed += 1
@@ -139,9 +148,6 @@ def rebuild_projection(db: Session, agent_id: str) -> AgentReputationProjection:
             verified_platforms.add(event.platform_id)
         elif event.event_type == "JOB_COMPLETED":
             completed += 1
-        elif event.event_type == "DISPUTE_OPENED":
-            risk += 8
-            disputes += 1
         elif event.event_type == "JUDGMENT_FINALIZED" and event.provenance == "genlayer_verified":
             verdict = str(event.event_metadata.get("verdict", ""))
             last_finalized = event.event_id
