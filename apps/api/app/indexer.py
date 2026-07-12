@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 
@@ -36,6 +37,16 @@ class GenLayerEventIndexer:
             db.add(checkpoint)
             db.flush()
         return checkpoint
+
+    @staticmethod
+    def _proof_transaction(event_id: str) -> str | None:
+        transaction_hash = settings.genlayer_proof_transaction_hash
+        if (
+            event_id == settings.genlayer_proof_event_id
+            and re.fullmatch(r"0x[a-fA-F0-9]{64}", transaction_hash)
+        ):
+            return transaction_hash
+        return None
 
     def _materialize_read_models(self, db: Session, item: dict, occurred_at: datetime) -> None:
         """Rebuild mutable API read models from the ordered contract event stream."""
@@ -133,6 +144,27 @@ class GenLayerEventIndexer:
 
         db.flush()
 
+    def _restore_release_provenance(self, db: Session) -> None:
+        event_id = settings.genlayer_proof_event_id
+        transaction_hash = self._proof_transaction(event_id)
+        if not event_id or not transaction_hash:
+            return
+        event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
+        if not event:
+            return
+        if not event.transaction_hash:
+            contract_event = self.client.call_json("get_event", [event_id])
+            if not isinstance(contract_event, dict) or str(contract_event.get("event_id")) != event_id:
+                raise RuntimeError(f"Release proof event {event_id} was not readable from contract state")
+            event.transaction_hash = transaction_hash
+            event.contract_address = self.client.contract_address
+            event.event_metadata = {**event.event_metadata, "contract_readback_verified": True}
+        if event.job_id:
+            judgment = db.scalars(select(Judgment).where(Judgment.job_id == event.job_id)).first()
+            if judgment:
+                judgment.tx_hash = transaction_hash
+                judgment.verify_url = self.client.verify_url(transaction_hash)
+
     def sync_once(self, db: Session) -> dict:
         if not self.client.enabled():
             raise RuntimeError("Public runtime requires GENLAYER_MODE=live; indexer refused mock mode")
@@ -151,7 +183,11 @@ class GenLayerEventIndexer:
             event_id = str(item["event_id"])
             occurred_at = datetime.fromisoformat(item["occurred_at"]) if item.get("occurred_at") else datetime.utcnow()
             existing = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
-            transaction_hash = item.get("transaction_hash") or (existing.transaction_hash if existing else None)
+            transaction_hash = (
+                item.get("transaction_hash")
+                or (existing.transaction_hash if existing else None)
+                or self._proof_transaction(event_id)
+            )
             if not transaction_hash and item.get("dispute_id"):
                 source_event = db.scalars(
                     select(ReputationEvent)
@@ -167,6 +203,11 @@ class GenLayerEventIndexer:
                 existing.transaction_hash = transaction_hash
                 existing.block_number = item.get("block_number") or existing.block_number
                 existing.event_metadata = {**existing.event_metadata, "contract_readback_verified": True}
+                if existing.event_type == "JUDGMENT_FINALIZED" and transaction_hash and existing.job_id:
+                    judgment = db.scalars(select(Judgment).where(Judgment.job_id == existing.job_id)).first()
+                    if judgment:
+                        judgment.tx_hash = transaction_hash
+                        judgment.verify_url = self.client.verify_url(transaction_hash)
                 checkpoint.last_processed_event_id = event_id
                 checkpoint.last_processed_block = max(checkpoint.last_processed_block, int(item.get("block_number") or 0))
                 continue
@@ -195,6 +236,7 @@ class GenLayerEventIndexer:
             checkpoint.last_processed_event_id = event_id
             checkpoint.last_processed_block = max(checkpoint.last_processed_block, int(item.get("block_number") or 0))
             indexed += 1
+        self._restore_release_provenance(db)
         rebuild_all_projections(db)
         checkpoint.last_sync_at = datetime.utcnow()
         checkpoint.updated_at = datetime.utcnow()

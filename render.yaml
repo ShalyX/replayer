@@ -36,6 +36,10 @@ services:
         value: "5"
       - key: GENLAYER_INDEXER_POLL_INTERVAL
         value: "15"
+      - key: GENLAYER_PROOF_EVENT_ID
+        value: rep_evt_final_3ed80733353e5dfae9617a9d
+      - key: GENLAYER_PROOF_TRANSACTION_HASH
+        value: 0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6
 
 databases:
   - name: replayer-postgres

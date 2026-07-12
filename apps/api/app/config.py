@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     genlayer_read_timeout: int = 30
     genlayer_confirmation_depth: int = 0
     genlayer_start_block: int = 0
+    genlayer_proof_event_id: str = ""
+    genlayer_proof_transaction_hash: str = ""
 
     model_config = SettingsConfigDict(env_file="../../.env", env_file_encoding="utf-8", extra="ignore")
 
