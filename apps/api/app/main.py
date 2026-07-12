@@ -353,15 +353,14 @@ def register_agent(payload: AgentRegister, db: Session = Depends(get_db), auth: 
         "owner_wallet": payload.owner_wallet, "name": payload.agent_name,
         "capabilities": payload.capabilities, "metadata_uri": payload.metadata_uri,
     })
-    agent = Agent(
-        id=agent_id,
-        platform_id=payload.platform_id,
-        owner_wallet=payload.owner_wallet,
-        name=payload.agent_name,
-        capabilities=payload.capabilities,
-        metadata_uri=payload.metadata_uri,
-    )
-    db.add(agent)
+    agent = db.get(Agent, agent_id)
+    if not agent:
+        agent = Agent(id=agent_id, platform_id=payload.platform_id, name=payload.agent_name)
+        db.add(agent)
+    agent.owner_wallet = payload.owner_wallet
+    agent.name = payload.agent_name
+    agent.capabilities = payload.capabilities
+    agent.metadata_uri = payload.metadata_uri
     append_event(db, event_id=contract_event_id("agent_registered", agent_id), event_type="AGENT_REGISTERED", agent_id=agent_id, platform_id=payload.platform_id,
                  provenance="platform_reported", verification_status="finalized", category="research",
                  transaction_hash=tx.get("tx_id") or None, contract_address=tx.get("contract_address") or None,
@@ -386,17 +385,19 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db), auth: dict = D
                               counterparty_id=payload.requester_id,
                               metadata={"task_spec": payload.task_spec, "payment_amount": payload.payment_amount,
                                         "currency": payload.currency})
-    job = Job(
-        id=job_id,
-        platform_id=payload.platform_id,
-        requester_id=payload.requester_id,
-        provider_agent_id=payload.provider_agent_id,
-        task_spec=payload.task_spec,
-        category=payload.category,
-        payment_amount=payload.payment_amount,
-        currency=payload.currency,
-    )
-    db.add(job)
+    job = db.get(Job, job_id)
+    if not job:
+        job = Job(
+            id=job_id,
+            platform_id=payload.platform_id,
+            requester_id=payload.requester_id,
+            provider_agent_id=payload.provider_agent_id,
+            task_spec=payload.task_spec,
+        )
+        db.add(job)
+    job.category = payload.category
+    job.payment_amount = payload.payment_amount
+    job.currency = payload.currency
     append_event(db, event_id=contract_event_id("job_created", job.id), event_type="JOB_CREATED", agent_id=job.provider_agent_id, platform_id=job.platform_id,
                  job_id=job.id, counterparty_id=job.requester_id, category=job.category,
                  provenance="platform_reported", verification_status="finalized",
@@ -423,15 +424,14 @@ def submit_deliverable(
                               job_id=job.id, category=job.category, evidence_uri=payload.deliverable_uri,
                               metadata={"deliverable_id": deliverable_id, "summary": payload.summary,
                                         "evidence_urls": payload.evidence_urls})
-    deliverable = Deliverable(
-        id=deliverable_id,
-        job_id=job_id,
-        deliverable_uri=payload.deliverable_uri,
-        summary=payload.summary,
-        evidence_urls=payload.evidence_urls,
-    )
+    deliverable = db.scalars(select(Deliverable).where(Deliverable.job_id == job_id)).first()
+    if not deliverable:
+        deliverable = Deliverable(id=deliverable_id, job_id=job_id, deliverable_uri=payload.deliverable_uri)
+        db.add(deliverable)
+    deliverable.deliverable_uri = payload.deliverable_uri
+    deliverable.summary = payload.summary
+    deliverable.evidence_urls = payload.evidence_urls
     job.status = "submitted"
-    db.add(deliverable)
     append_event(db, event_id=contract_event_id("deliverable_submitted", job.id), event_type="DELIVERABLE_SUBMITTED", agent_id=job.provider_agent_id,
                  platform_id=job.platform_id, job_id=job.id, category=job.category,
                  provenance="platform_reported", verification_status="finalized",
@@ -476,16 +476,15 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
         "evidence_uri": payload.evidence_uri, "evidence_hash": "", "category": job.category,
         "provisional_event_id": provisional_event_id, "references": [],
     }, sort_keys=True)])
-    dispute = Dispute(
-        id=dispute_id,
-        job_id=job_id,
-        claimant=payload.claimant,
-        reason=payload.reason,
-        evidence_uri=payload.evidence_uri,
-        bond_amount=payload.bond_amount,
-    )
+    dispute = db.get(Dispute, dispute_id)
+    if not dispute:
+        dispute = Dispute(id=dispute_id, job_id=job_id, reason=payload.reason)
+        db.add(dispute)
+    dispute.claimant = payload.claimant
+    dispute.reason = payload.reason
+    dispute.evidence_uri = payload.evidence_uri
+    dispute.bond_amount = payload.bond_amount
     job.status = "disputed"
-    db.add(dispute)
     append_event(db, event_type="DISPUTE_OPENED", agent_id=job.provider_agent_id, platform_id=job.platform_id,
                  job_id=job.id, dispute_id=dispute.id, counterparty_id=payload.claimant,
                  category=job.category, provenance="platform_reported", verification_status="pending",
@@ -537,22 +536,20 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
         "reasoning_summary": raw.get("reasoning_summary", ""),
         "score_deltas": raw.get("score_deltas") or {},
     }
-    judgment = Judgment(
-        id=new_id("judgment"),
-        job_id=job_id,
-        dispute_id=dispute.id,
-        verdict=result["verdict"],
-        confidence_bps=result["confidence_bps"],
-        reasoning_summary=result["reasoning_summary"],
-        score_deltas=result["score_deltas"],
-        source="genlayer",
-        contract_address=genlayer.contract_address,
-        tx_hash=resolve_tx["tx_id"],
-        verify_url=genlayer.verify_url(resolve_tx["tx_id"]),
-    )
+    judgment = db.scalars(select(Judgment).where(Judgment.job_id == job_id)).first()
+    if not judgment:
+        judgment = Judgment(id=new_id("judgment"), job_id=job_id, dispute_id=dispute.id, verdict=result["verdict"])
+        db.add(judgment)
+    judgment.verdict = result["verdict"]
+    judgment.confidence_bps = result["confidence_bps"]
+    judgment.reasoning_summary = result["reasoning_summary"]
+    judgment.score_deltas = result["score_deltas"]
+    judgment.source = "genlayer"
+    judgment.contract_address = genlayer.contract_address
+    judgment.tx_hash = resolve_tx["tx_id"]
+    judgment.verify_url = genlayer.verify_url(resolve_tx["tx_id"])
     dispute.status = "resolved"
     job.status = f"judged_{result['verdict']}"
-    db.add(judgment)
     judgment_event = append_event(
         db, event_id=final_event_id, event_type="JUDGMENT_FINALIZED", agent_id=job.provider_agent_id,
         platform_id=job.platform_id, job_id=job.id, dispute_id=dispute.id,
