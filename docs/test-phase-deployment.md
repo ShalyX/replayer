@@ -23,7 +23,6 @@ Fill these in the Render Blueprint screen:
 ADMIN_API_KEY=generate-a-long-random-value
 API_KEY=optional-backwards-compatible-dev-key
 GENLAYER_CONTRACT_ADDRESS=0xD1fB33f973db0F8521e44D70DD603C484283a709
-GENLAYER_ACCOUNT_PASSWORD=generate-a-long-random-runtime-keystore-password
 ```
 
 The V2 public runtime requires:
@@ -33,7 +32,7 @@ GENLAYER_MODE=live
 ALLOW_TEST_MOCKS=false
 ```
 
-The API Docker image installs the GenLayer CLI, selects StudioNet, provisions a gasless runtime account, and starts the contract indexer alongside FastAPI.
+The API Docker image installs the GenLayer CLI, selects StudioNet, provisions a gasless runtime account with a Render-generated keystore password, and starts the contract indexer alongside FastAPI.
 
 ## Render Blueprint Link
 

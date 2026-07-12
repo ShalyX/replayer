@@ -23,7 +23,7 @@ services:
       - key: GENLAYER_CONTRACT_ADDRESS
         value: 0xD1fB33f973db0F8521e44D70DD603C484283a709
       - key: GENLAYER_ACCOUNT_PASSWORD
-        sync: false
+        generateValue: true
       - key: GENLAYER_ACCOUNT_NAME
         value: replayer-runtime
       - key: GENLAYER_EXPLORER_BASE_URL
