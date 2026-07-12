@@ -210,3 +210,14 @@ class AgentReputationProjection(Base):
     last_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     details: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+
+class DemoRun(Base):
+    __tablename__ = "demo_runs"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    result: Mapped[dict] = mapped_column(JsonType, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

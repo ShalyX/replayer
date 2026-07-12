@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import json
 import secrets
-import threading
 import time
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
@@ -16,7 +15,7 @@ from .database import Base, SessionLocal, engine, get_db
 from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
 from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_projection
-from .models import Agent, AgentReputationProjection, Deliverable, Dispute, Job, Judgment, Platform, ReputationEvent, new_id
+from .models import Agent, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, ReputationEvent, new_id
 from .schemas import AgentRegister, DeliverableSubmit, DisputeOpen, JobCreate, PlatformRegister, TrustEvaluateRequest
 
 Base.metadata.create_all(bind=engine)
@@ -52,8 +51,6 @@ app.add_middleware(
 genlayer = GenLayerClient()
 indexer = GenLayerEventIndexer(genlayer)
 ADMIN_AUTH = {"type": "admin", "platform_id": None}
-DEMO_RUNS: dict[str, dict] = {}
-DEMO_RUNS_LOCK = threading.Lock()
 
 
 @app.exception_handler(RuntimeError)
@@ -295,39 +292,43 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
 
 
 def execute_demo_run(run_id: str) -> None:
-    with DEMO_RUNS_LOCK:
-        DEMO_RUNS[run_id] = {"run_id": run_id, "status": "running"}
     with SessionLocal() as db:
+        run = db.get(DemoRun, run_id)
+        if not run:
+            return
+        run.status = "running"
+        db.commit()
         try:
             result = seed_demo(db)
-            with DEMO_RUNS_LOCK:
-                DEMO_RUNS[run_id] = {"run_id": run_id, "status": "completed", "result": result}
+            run = db.get(DemoRun, run_id)
+            run.status = "completed"
+            run.result = result
+            run.error = ""
+            db.commit()
         except Exception as exc:
             db.rollback()
-            with DEMO_RUNS_LOCK:
-                DEMO_RUNS[run_id] = {
-                    "run_id": run_id,
-                    "status": "failed",
-                    "error": clean_runtime_error(str(exc)) or exc.__class__.__name__,
-                }
+            run = db.get(DemoRun, run_id)
+            if run:
+                run.status = "failed"
+                run.error = clean_runtime_error(str(exc)) or exc.__class__.__name__
+                db.commit()
 
 
 @app.post("/demo/runs", dependencies=[Depends(require_key)])
-def start_demo_run(background_tasks: BackgroundTasks) -> dict:
+def start_demo_run(background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> dict:
     run_id = new_id("demo_run")
-    with DEMO_RUNS_LOCK:
-        DEMO_RUNS[run_id] = {"run_id": run_id, "status": "pending"}
+    db.add(DemoRun(id=run_id, status="pending"))
+    db.commit()
     background_tasks.add_task(execute_demo_run, run_id)
-    return DEMO_RUNS[run_id]
+    return {"run_id": run_id, "status": "pending"}
 
 
 @app.get("/demo/runs/{run_id}", dependencies=[Depends(require_key)])
-def get_demo_run(run_id: str) -> dict:
-    with DEMO_RUNS_LOCK:
-        run = DEMO_RUNS.get(run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="Unknown demo run")
-        return run
+def get_demo_run(run_id: str, db: Session = Depends(get_db)) -> dict:
+    run = db.get(DemoRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Unknown demo run")
+    return {"run_id": run.id, "status": run.status, "result": run.result or None, "error": run.error or None}
 
 
 @app.get("/platforms/{platform_id}/agents")
