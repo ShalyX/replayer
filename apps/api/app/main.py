@@ -8,7 +8,7 @@ import time
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -127,6 +127,11 @@ def authorize_platform(auth: dict, platform_id: str) -> None:
         return
     if auth.get("platform_id") != platform_id:
         raise HTTPException(status_code=403, detail="API key is not authorized for this platform")
+
+
+def acquire_ledger_write_lock(db: Session) -> None:
+    if db.bind and db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 724_726_592})
 
 
 @app.get("/health")
@@ -382,6 +387,7 @@ def rotate_platform_api_key(platform_id: str, db: Session = Depends(get_db)) -> 
 
 @app.post("/agents/register")
 def register_agent(payload: AgentRegister, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
     authorize_platform(auth, payload.platform_id)
     if not db.get(Platform, payload.platform_id):
         raise HTTPException(status_code=404, detail="Unknown platform")
@@ -411,6 +417,7 @@ def register_agent(payload: AgentRegister, db: Session = Depends(get_db), auth: 
 
 @app.post("/jobs")
 def create_job(payload: JobCreate, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
     authorize_platform(auth, payload.platform_id)
     if not db.get(Platform, payload.platform_id):
         raise HTTPException(status_code=404, detail="Unknown platform")
@@ -454,6 +461,7 @@ def submit_deliverable(
     db: Session = Depends(get_db),
     auth: dict = Depends(get_auth),
 ) -> dict:
+    acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
     authorize_platform(auth, job.platform_id)
     if job.status != "created":
@@ -484,6 +492,7 @@ def submit_deliverable(
 
 @app.post("/jobs/{job_id}/accept")
 def accept_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
     authorize_platform(auth, job.platform_id)
     if job.status != "submitted":
@@ -503,6 +512,7 @@ def accept_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(
 
 @app.post("/jobs/{job_id}/dispute")
 def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
     authorize_platform(auth, job.platform_id)
     if job.status != "submitted":
@@ -537,6 +547,7 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
 
 @app.post("/jobs/{job_id}/evaluate")
 def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
     authorize_platform(auth, job.platform_id)
     dispute = db.scalars(select(Dispute).where(Dispute.job_id == job_id)).first()

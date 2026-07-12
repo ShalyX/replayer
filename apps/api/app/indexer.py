@@ -4,7 +4,7 @@ import re
 import time
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -168,6 +168,8 @@ class GenLayerEventIndexer:
     def sync_once(self, db: Session) -> dict:
         if not self.client.enabled():
             raise RuntimeError("Public runtime requires GENLAYER_MODE=live; indexer refused mock mode")
+        if db.bind and db.bind.dialect.name == "postgresql":
+            db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 724_726_592})
         checkpoint = self.checkpoint(db)
         # An explicit sentinel survives Windows/CLI argument parsing; the contract treats an unknown cursor as genesis.
         raw = self.client.call_json("get_events_after", [checkpoint.last_processed_event_id or "__START__", "100"])
