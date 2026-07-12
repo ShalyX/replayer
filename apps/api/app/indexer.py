@@ -9,7 +9,17 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .genlayer import GenLayerClient
 from .ledger import append_event, rebuild_all_projections
-from .models import IndexerCheckpoint, ReputationEvent
+from .models import (
+    Agent,
+    Deliverable,
+    Dispute,
+    IndexerCheckpoint,
+    Job,
+    Judgment,
+    Platform,
+    ReputationEvent,
+    new_id,
+)
 
 
 class GenLayerEventIndexer:
@@ -27,6 +37,102 @@ class GenLayerEventIndexer:
             db.flush()
         return checkpoint
 
+    def _materialize_read_models(self, db: Session, item: dict, occurred_at: datetime) -> None:
+        """Rebuild mutable API read models from the ordered contract event stream."""
+        event_type = str(item["event_type"])
+        agent_id = str(item["agent_id"])
+        platform_id = str(item["platform_id"])
+        job_id = str(item.get("job_id") or "")
+        dispute_id = str(item.get("dispute_id") or "")
+        metadata = item.get("metadata") or {}
+
+        if not db.get(Platform, platform_id):
+            db.add(Platform(id=platform_id, name=platform_id, created_at=occurred_at))
+            db.flush()
+
+        agent = db.get(Agent, agent_id)
+        if not agent:
+            agent = Agent(
+                id=agent_id,
+                platform_id=platform_id,
+                owner_wallet=str(metadata.get("owner_wallet") or ""),
+                name=str(metadata.get("name") or agent_id),
+                capabilities=metadata.get("capabilities") or [],
+                metadata_uri=str(metadata.get("metadata_uri") or ""),
+                created_at=occurred_at,
+            )
+            db.add(agent)
+            db.flush()
+
+        job = db.get(Job, job_id) if job_id else None
+        if job_id and not job:
+            job = Job(
+                id=job_id,
+                requester_id=str(item.get("counterparty_id") or metadata.get("claimant") or "unknown"),
+                provider_agent_id=agent_id,
+                platform_id=platform_id,
+                task_spec=str(metadata.get("task_spec") or "Recovered from GenLayer event ledger"),
+                category=str(item.get("category") or "research"),
+                payment_amount=metadata.get("payment_amount") or 0,
+                currency=str(metadata.get("currency") or "USDC"),
+                created_at=occurred_at,
+                updated_at=occurred_at,
+            )
+            db.add(job)
+            db.flush()
+
+        if job and event_type == "DELIVERABLE_SUBMITTED":
+            if not db.scalars(select(Deliverable).where(Deliverable.job_id == job.id)).first():
+                db.add(Deliverable(
+                    id=str(metadata.get("deliverable_id") or new_id("deliv")),
+                    job_id=job.id,
+                    deliverable_uri=str(item.get("evidence_uri") or "ledger://recovered"),
+                    summary=str(metadata.get("summary") or "Recovered from GenLayer event ledger"),
+                    evidence_urls=metadata.get("evidence_urls") or [],
+                    submitted_at=occurred_at,
+                ))
+            job.status = "submitted"
+        elif job and event_type in {"JOB_ACCEPTED", "JOB_COMPLETED"}:
+            job.status = "accepted"
+
+        dispute = db.get(Dispute, dispute_id) if dispute_id else None
+        if job and dispute_id and not dispute:
+            dispute = Dispute(
+                id=dispute_id,
+                job_id=job.id,
+                claimant=str(item.get("counterparty_id") or metadata.get("claimant") or "requester"),
+                reason=str(metadata.get("reasoning_summary") or metadata.get("reason") or "Recovered GenLayer dispute"),
+                evidence_uri=str(item.get("evidence_uri") or ""),
+                status="open",
+                opened_at=occurred_at,
+            )
+            db.add(dispute)
+            db.flush()
+            job.status = "disputed"
+
+        if job and dispute and event_type == "JUDGMENT_FINALIZED":
+            verdict = str(metadata.get("verdict") or "inconclusive")
+            existing_judgment = db.scalars(select(Judgment).where(Judgment.job_id == job.id)).first()
+            if not existing_judgment:
+                db.add(Judgment(
+                    id=new_id("judgment"),
+                    job_id=job.id,
+                    dispute_id=dispute.id,
+                    verdict=verdict,
+                    confidence_bps=int(metadata.get("confidence_bps") or 0),
+                    reasoning_summary=str(metadata.get("reasoning_summary") or ""),
+                    score_deltas=metadata.get("score_deltas") or {},
+                    source="genlayer",
+                    contract_address=self.client.contract_address,
+                    tx_hash=str(item.get("transaction_hash") or ""),
+                    verify_url=self.client.verify_url(str(item.get("transaction_hash") or "")) if item.get("transaction_hash") else "",
+                    created_at=occurred_at,
+                ))
+            dispute.status = "resolved"
+            job.status = f"judged_{verdict}"
+
+        db.flush()
+
     def sync_once(self, db: Session) -> dict:
         if not self.client.enabled():
             raise RuntimeError("Public runtime requires GENLAYER_MODE=live; indexer refused mock mode")
@@ -43,6 +149,7 @@ class GenLayerEventIndexer:
         indexed = 0
         for item in events:
             event_id = str(item["event_id"])
+            occurred_at = datetime.fromisoformat(item["occurred_at"]) if item.get("occurred_at") else datetime.utcnow()
             existing = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
             transaction_hash = item.get("transaction_hash") or (existing.transaction_hash if existing else None)
             if not transaction_hash and item.get("dispute_id"):
@@ -63,6 +170,7 @@ class GenLayerEventIndexer:
                 checkpoint.last_processed_event_id = event_id
                 checkpoint.last_processed_block = max(checkpoint.last_processed_block, int(item.get("block_number") or 0))
                 continue
+            self._materialize_read_models(db, item, occurred_at)
             append_event(
                 db,
                 event_id=event_id,
@@ -81,7 +189,7 @@ class GenLayerEventIndexer:
                 contract_address=self.client.contract_address,
                 transaction_hash=transaction_hash,
                 block_number=item.get("block_number"),
-                occurred_at=datetime.fromisoformat(item["occurred_at"]) if item.get("occurred_at") else datetime.utcnow(),
+                occurred_at=occurred_at,
                 metadata={**item.get("metadata", {}), "contract_readback_verified": True},
             )
             checkpoint.last_processed_event_id = event_id
