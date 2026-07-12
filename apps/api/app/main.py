@@ -2,9 +2,10 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
@@ -315,11 +316,11 @@ def execute_demo_run(run_id: str) -> None:
 
 
 @app.post("/demo/runs", dependencies=[Depends(require_key)])
-def start_demo_run(background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> dict:
+def start_demo_run(db: Session = Depends(get_db)) -> dict:
     run_id = new_id("demo_run")
     db.add(DemoRun(id=run_id, status="pending"))
     db.commit()
-    background_tasks.add_task(execute_demo_run, run_id)
+    threading.Thread(target=execute_demo_run, args=(run_id,), daemon=True).start()
     return {"run_id": run_id, "status": "pending"}
 
 
