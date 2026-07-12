@@ -77,14 +77,14 @@ export default function Dashboard() {
   async function resetDemo() {
     setBusy(true);
     setError("");
-    setStatus("Resetting local demo records...");
+    setStatus("Preparing a fresh demo run while preserving ledger history...");
     try {
       await api("/demo/reset", { method: "POST", body: "{}" });
       window.localStorage.removeItem(LAST_DEMO_AGENT_KEY);
       setDemo(null);
       setProfileHref("");
       setEvents(defaultEvents);
-      setStatus("Demo records reset. The next run will create a fresh GenLayer-backed story.");
+      setStatus("Demo view reset. The next run creates a fresh GenLayer-backed story; prior ledger events remain verifiable.");
     } catch (caught) {
       setError(toErrorMessage(caught));
       setStatus("Reset failed. The API returned an error, but the page is still usable.");

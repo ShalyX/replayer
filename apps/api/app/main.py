@@ -7,7 +7,7 @@ import time
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -15,7 +15,7 @@ from .database import Base, engine, get_db
 from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
 from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_projection
-from .models import Agent, AgentReputationProjection, Deliverable, Dispute, Job, Judgment, Platform, ReputationEvent, ReputationSnapshot, new_id
+from .models import Agent, AgentReputationProjection, Deliverable, Dispute, Job, Judgment, Platform, ReputationEvent, new_id
 from .schemas import AgentRegister, DeliverableSubmit, DisputeOpen, JobCreate, PlatformRegister, TrustEvaluateRequest
 
 Base.metadata.create_all(bind=engine)
@@ -941,29 +941,9 @@ def evidence_for(
 
 
 def reset_demo_data(db: Session) -> dict:
-    demo_platforms = ("researchagents_io_%", "partner_market_%", "platform_demo_%")
-    demo_agents = ("deepresearchbot_%", "agent_research_%")
-    demo_jobs = ("research_good_%", "research_fraud_%", "job_good_%", "job_bad_%")
-    demo_deliverables = ("deliv_research_good_%", "deliv_research_fraud_%", "deliv_job_good_%", "deliv_job_bad_%")
-    demo_disputes = ("disp_research_fraud_%", "disp_job_bad_%")
-
-    def like_any(column, patterns: tuple[str, ...]):
-        return or_(*(column.like(pattern) for pattern in patterns))
-
-    counts = {}
-    for label, model, condition in [
-        ("judgments", Judgment, like_any(Judgment.job_id, demo_jobs)),
-        ("disputes", Dispute, like_any(Dispute.id, demo_disputes)),
-        ("deliverables", Deliverable, like_any(Deliverable.id, demo_deliverables)),
-        ("reputation_snapshots", ReputationSnapshot, like_any(ReputationSnapshot.agent_id, demo_agents)),
-        ("jobs", Job, like_any(Job.id, demo_jobs)),
-        ("agents", Agent, like_any(Agent.id, demo_agents)),
-        ("platforms", Platform, like_any(Platform.id, demo_platforms)),
-    ]:
-        result = db.execute(delete(model).where(condition))
-        counts[label] = result.rowcount or 0
-    db.commit()
-    return {"deleted": counts}
+    # V2 reputation events are append-only. A demo reset starts a fresh namespaced
+    # run and clears client state without deleting ledger-backed history.
+    return {"deleted": {}, "ledger_preserved": True}
 
 
 def json_list(values: list[str]) -> str:
