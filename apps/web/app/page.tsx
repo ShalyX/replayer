@@ -45,6 +45,13 @@ type DemoSeed = {
   demo_line: string;
 };
 
+type DemoRun = {
+  run_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: DemoSeed;
+  error?: string;
+};
+
 const defaultEvents = [
   "ResearchAgents.io registers and lists DeepResearchBot.",
   "DeepResearchBot completes a good sourced research job.",
@@ -54,7 +61,7 @@ const defaultEvents = [
 ];
 
 const LAST_DEMO_AGENT_KEY = "agent-reputation-registry:last-demo-agent";
-const CONTRACT_ADDRESS = "0x59a8924E6E7D3A460e2154a304fCC2BEfEc3c8Dd";
+const CONTRACT_ADDRESS = "0xD1fB33f973db0F8521e44D70DD603C484283a709";
 
 export default function Dashboard() {
   const [demo, setDemo] = useState<DemoSeed | null>(null);
@@ -98,7 +105,16 @@ export default function Dashboard() {
     setError("");
     setStatus("Running ResearchAgents.io story against the live contract. This can take a few minutes.");
     try {
-      const seeded = await api<DemoSeed>("/demo/seed", { method: "POST", body: "{}" });
+      const started = await api<DemoRun>("/demo/runs", { method: "POST", body: "{}" });
+      let run = started;
+      for (let attempt = 0; attempt < 180 && run.status !== "completed" && run.status !== "failed"; attempt += 1) {
+        setStatus(`GenLayer consensus is running. Live check ${attempt + 1}...`);
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+        run = await api<DemoRun>(`/demo/runs/${started.run_id}`);
+      }
+      if (run.status === "failed") throw new Error(run.error || "Live GenLayer demo failed");
+      if (run.status !== "completed" || !run.result) throw new Error("Live GenLayer demo is still pending. Retry shortly.");
+      const seeded = run.result;
       const nextProfileHref = `/agents/${seeded.story.agent_id}`;
       window.localStorage.setItem(LAST_DEMO_AGENT_KEY, seeded.story.agent_id);
       setDemo(seeded);

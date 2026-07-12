@@ -2,16 +2,17 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
 from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
 from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_projection
@@ -51,6 +52,8 @@ app.add_middleware(
 genlayer = GenLayerClient()
 indexer = GenLayerEventIndexer(genlayer)
 ADMIN_AUTH = {"type": "admin", "platform_id": None}
+DEMO_RUNS: dict[str, dict] = {}
+DEMO_RUNS_LOCK = threading.Lock()
 
 
 @app.exception_handler(RuntimeError)
@@ -284,6 +287,42 @@ def seed_demo(db: Session = Depends(get_db)) -> dict:
         "partner_agents": partner_agents,
         "demo_line": "Any agent platform can integrate this API and outsource trust, disputes, and portable reputation to GenLayer.",
     }
+
+
+def execute_demo_run(run_id: str) -> None:
+    with DEMO_RUNS_LOCK:
+        DEMO_RUNS[run_id] = {"run_id": run_id, "status": "running"}
+    with SessionLocal() as db:
+        try:
+            result = seed_demo(db)
+            with DEMO_RUNS_LOCK:
+                DEMO_RUNS[run_id] = {"run_id": run_id, "status": "completed", "result": result}
+        except Exception as exc:
+            db.rollback()
+            with DEMO_RUNS_LOCK:
+                DEMO_RUNS[run_id] = {
+                    "run_id": run_id,
+                    "status": "failed",
+                    "error": clean_runtime_error(str(exc)) or exc.__class__.__name__,
+                }
+
+
+@app.post("/demo/runs", dependencies=[Depends(require_key)])
+def start_demo_run(background_tasks: BackgroundTasks) -> dict:
+    run_id = new_id("demo_run")
+    with DEMO_RUNS_LOCK:
+        DEMO_RUNS[run_id] = {"run_id": run_id, "status": "pending"}
+    background_tasks.add_task(execute_demo_run, run_id)
+    return DEMO_RUNS[run_id]
+
+
+@app.get("/demo/runs/{run_id}", dependencies=[Depends(require_key)])
+def get_demo_run(run_id: str) -> dict:
+    with DEMO_RUNS_LOCK:
+        run = DEMO_RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Unknown demo run")
+        return run
 
 
 @app.get("/platforms/{platform_id}/agents")
