@@ -22,17 +22,18 @@ Fill these in the Render Blueprint screen:
 ```bash
 ADMIN_API_KEY=generate-a-long-random-value
 API_KEY=optional-backwards-compatible-dev-key
-GENLAYER_CONTRACT_ADDRESS=0x59a8924E6E7D3A460e2154a304fCC2BEfEc3c8Dd
-GENLAYER_ACCOUNT_PASSWORD=only-if-using-live-genlayer
+GENLAYER_CONTRACT_ADDRESS=0xD1fB33f973db0F8521e44D70DD603C484283a709
+GENLAYER_ACCOUNT_PASSWORD=generate-a-long-random-runtime-keystore-password
 ```
 
-For test phase, start with:
+The V2 public runtime requires:
 
 ```bash
-GENLAYER_MODE=mock
+GENLAYER_MODE=live
+ALLOW_TEST_MOCKS=false
 ```
 
-Switch to `GENLAYER_MODE=live` only after confirming the GenLayer CLI, account, password, and RPC behavior work in the hosted environment.
+The API Docker image installs the GenLayer CLI, selects StudioNet, provisions a gasless runtime account, and starts the contract indexer alongside FastAPI.
 
 ## Render Blueprint Link
 
@@ -67,4 +68,3 @@ Redeploy the frontend after changing those environment variables.
 ## Production Note
 
 The Render free plan is enough for test users, but not production. Before production, upgrade the database, add migrations, configure backups, and move long-running GenLayer work into an async queue.
-

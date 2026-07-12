@@ -86,14 +86,15 @@ Key settings:
 DATABASE_URL=postgresql+psycopg://replayer:replayer@localhost:5432/replayer
 API_KEY=dev-key
 ADMIN_API_KEY=dev-key
-GENLAYER_MODE=mock
-GENLAYER_CONTRACT_ADDRESS=0x59a8924E6E7D3A460e2154a304fCC2BEfEc3c8Dd
+GENLAYER_MODE=live
+ALLOW_TEST_MOCKS=false
+GENLAYER_CONTRACT_ADDRESS=0xD1fB33f973db0F8521e44D70DD603C484283a709
 GENLAYER_EXPLORER_BASE_URL=https://explorer-studio.genlayer.com/tx
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 NEXT_PUBLIC_API_KEY=dev-key
 ```
 
-Use `GENLAYER_MODE=live` when you want disputes to call the deployed contract.
+The public runtime requires live GenLayer mode. Mocks are limited to automated tests.
 
 ## Run Locally
 

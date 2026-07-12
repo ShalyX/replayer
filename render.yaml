@@ -1,13 +1,12 @@
 services:
   - type: web
     name: replayer-api
-    runtime: python
+    runtime: docker
     plan: free
     branch: main
     autoDeploy: true
     healthCheckPath: /health
-    buildCommand: pip install -r apps/api/requirements.txt
-    startCommand: cd apps/api && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile.api
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -18,11 +17,15 @@ services:
       - key: API_KEY
         sync: false
       - key: GENLAYER_MODE
-        value: mock
+        value: live
+      - key: ALLOW_TEST_MOCKS
+        value: "false"
       - key: GENLAYER_CONTRACT_ADDRESS
-        sync: false
+        value: 0xD1fB33f973db0F8521e44D70DD603C484283a709
       - key: GENLAYER_ACCOUNT_PASSWORD
         sync: false
+      - key: GENLAYER_ACCOUNT_NAME
+        value: replayer-runtime
       - key: GENLAYER_EXPLORER_BASE_URL
         value: https://explorer-studio.genlayer.com/tx
       - key: GENLAYER_COMMAND_TIMEOUT_SECONDS
@@ -31,6 +34,8 @@ services:
         value: "6"
       - key: GENLAYER_READ_INTERVAL_SECONDS
         value: "5"
+      - key: GENLAYER_INDEXER_POLL_INTERVAL
+        value: "15"
 
 databases:
   - name: replayer-postgres
