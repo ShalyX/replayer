@@ -1,12 +1,17 @@
 const isProduction = process.env.NODE_ENV === "production";
-const API_BASE = isProduction ? "/api/replayer" : (process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000");
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || (isProduction ? "" : "dev-key");
+const isServer = typeof window === "undefined";
+const API_BASE = isProduction
+  ? (isServer ? process.env.NEXT_PUBLIC_API_BASE : "/api/replayer")
+  : (process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000");
+const API_KEY = isProduction && isServer
+  ? process.env.REPLAYER_API_KEY
+  : (process.env.NEXT_PUBLIC_API_KEY || (isProduction ? "" : "dev-key"));
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API_BASE) {
     throw new Error("RepLayer API is not configured. Set NEXT_PUBLIC_API_BASE in Vercel and redeploy.");
   }
-  if (!isProduction && !API_KEY) {
+  if ((!isProduction || isServer) && !API_KEY) {
     throw new Error("RepLayer API key is not configured. Set NEXT_PUBLIC_API_KEY in Vercel and redeploy.");
   }
 
@@ -17,7 +22,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       cache: "no-store",
       headers: {
         "content-type": "application/json",
-        ...(isProduction ? {} : { "x-api-key": API_KEY }),
+        ...((!isProduction || isServer) ? { "x-api-key": API_KEY } : {}),
         ...(init.headers || {}),
       },
     });
