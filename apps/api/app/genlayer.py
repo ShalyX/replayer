@@ -3,6 +3,8 @@ import os
 import re
 import shutil
 import subprocess
+import json
+from pathlib import Path
 
 from .config import settings
 
@@ -20,8 +22,13 @@ class GenLayerClient:
         if not self.enabled() and not settings.allow_test_mocks:
             raise RuntimeError("GENLAYER_MODE=mock is disabled outside automated tests")
 
-    def _run(self, args: list[str], password: bool = False) -> str:
-        stdin = f"{self.password}\n" if password and self.password else None
+    def _run(self, args: list[str], password: bool = False, confirm: bool = False) -> str:
+        stdin_parts = []
+        if password and self.password:
+            stdin_parts.append(self.password)
+        if confirm:
+            stdin_parts.append("y")
+        stdin = "\n".join(stdin_parts) + "\n" if stdin_parts else None
         command = ["genlayer", *args]
         if os.name == "nt":
             launcher = shutil.which("genlayer.cmd") or shutil.which("genlayer.exe") or shutil.which("genlayer")
@@ -123,13 +130,84 @@ class GenLayerClient:
         output = self._run([
             "receipt", tx_id, "--status", "ACCEPTED", "--stdout", "--stderr",
             "--retries", "1", "--interval", "1000",
-        ])
+        ], password=True)
         return {
             "transaction_hash": tx_id,
             "execution_result": self._leader_execution_result(output),
             "contract_error": self._contract_error(output),
             "output": output[-12000:],
         }
+
+    def transaction_status(self, tx_id: str) -> dict:
+        if not re.fullmatch(r"0x[a-fA-F0-9]{64}", tx_id):
+            raise ValueError("Invalid GenLayer transaction hash")
+        output = self._run([
+            "receipt", tx_id, "--status", "ACCEPTED", "--retries", "1", "--interval", "1000",
+        ], password=True)
+        status_match = re.search(r"status_name:\s*['\"]([A-Z_]+)['\"]", output)
+        rounds = [int(value) for value in re.findall(r"\bround:\s*['\"]?(\d+)", output)]
+        return {
+            "transaction_hash": tx_id,
+            "status": status_match.group(1) if status_match else "UNKNOWN",
+            "round": max(rounds) if rounds else 0,
+            "appealed": bool(re.search(r"AppealSubmitted:\s*[1-9]\d*", output)) or bool(rounds and max(rounds) > 0),
+        }
+
+    def appeal_transaction(self, tx_id: str, bond_amount: str = "") -> dict:
+        self.require_live()
+        if not re.fullmatch(r"0x[a-fA-F0-9]{64}", tx_id):
+            raise ValueError("Invalid GenLayer transaction hash")
+        before = self.transaction_status(tx_id)
+        if before["status"] == "FINALIZED":
+            if before["appealed"]:
+                return {**before, "appeal_submission_hash": tx_id,
+                        "bond_amount": bond_amount, "recovered": True}
+            raise RuntimeError("GenLayer rejected the appeal because the transaction is already finalized")
+        if before["status"] != "ACCEPTED":
+            raise RuntimeError(f"GenLayer transaction is not currently appealable: {before['status']}")
+        result = self._run_protocol("appeal", tx_id, bond_amount)
+        status = self.transaction_status(tx_id)
+        if status["status"] == "FINALIZED" and not status["appealed"]:
+            raise RuntimeError("GenLayer rejected the appeal because the transaction is already finalized")
+        return {
+            **status,
+            "appeal_submission_hash": result["transaction_hash"],
+            "bond_amount": bond_amount,
+        }
+
+    def finalize_transaction(self, tx_id: str) -> dict:
+        self.require_live()
+        if not re.fullmatch(r"0x[a-fA-F0-9]{64}", tx_id):
+            raise ValueError("Invalid GenLayer transaction hash")
+        result = self._run_protocol("finalize", tx_id)
+        return {
+            **self.transaction_status(tx_id),
+            "finalization_hash": result["transaction_hash"],
+        }
+
+    def _run_protocol(self, operation: str, tx_id: str, bond_amount: str = "") -> dict:
+        script = Path(__file__).resolve().parents[1] / "scripts" / "genlayer_protocol.mjs"
+        env = os.environ.copy()
+        env["GENLAYER_ACCOUNT_PASSWORD"] = self.password
+        env["GENLAYER_NETWORK"] = settings.genlayer_network
+        if settings.genlayer_private_key:
+            env["GENLAYER_PRIVATE_KEY"] = settings.genlayer_private_key
+        command = ["node", str(script), operation, tx_id]
+        if bond_amount:
+            command.append(bond_amount)
+        completed = subprocess.run(
+            command, capture_output=True, text=True, timeout=self.timeout, env=env,
+        )
+        if completed.returncode:
+            raise RuntimeError((completed.stderr or completed.stdout or "GenLayer protocol operation failed")[-4000:])
+        for line in reversed(completed.stdout.splitlines()):
+            try:
+                result = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(result, dict) and result.get("transaction_hash"):
+                return result
+        raise RuntimeError("GenLayer protocol operation returned no transaction hash")
 
     def verify_url(self, tx_id: str) -> str:
         if not tx_id:

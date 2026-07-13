@@ -43,6 +43,14 @@ class DisputeOpen(BaseModel):
     bond_amount: float = 0
 
 
+class AppealSubmit(BaseModel):
+    appellant_id: str = "agent_owner"
+    reason: str
+    evidence_uri: str
+    evidence_hash: str = ""
+    bond_amount: str = ""
+
+
 class AttestationCreate(BaseModel):
     agent_id: str
     platform_id: str

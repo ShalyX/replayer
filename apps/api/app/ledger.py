@@ -32,6 +32,7 @@ EVENT_TYPES = {
     "IDENTITY_LINKED", "IDENTITY_CHALLENGED", "IDENTITY_JUDGMENT_FINALIZED",
     "IDENTITY_LINK_FINALIZED", "IDENTITY_LINK_REJECTED", "IDENTITY_UNLINKED",
     "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED",
+    "APPEAL_SUBMITTED", "APPEAL_RESOLVED", "JUDGMENT_UPHELD", "JUDGMENT_OVERTURNED",
 }
 PROVENANCE = {
     "platform_reported", "counterparty_confirmed", "genlayer_provisional",
@@ -127,6 +128,8 @@ def event_dict(db: Session, event: ReputationEvent) -> dict:
 
 
 def rebuild_projection(db: Session, agent_id: str, projection: str = "research_trust_v1") -> AgentReputationProjection:
+    if projection == "research_trust_v5":
+        return rebuild_projection_v5(db, agent_id)
     if projection == "research_trust_v4":
         return rebuild_projection_v4(db, agent_id)
     if projection == "research_trust_v3":
@@ -240,6 +243,11 @@ def rebuild_all_projections(db: Session) -> list[AgentReputationProjection]:
         AgentReputationProjection.projection_version == "v4",
     ))
     projections.extend(rebuild_projection_v4(db, agent_id) for agent_id in agent_ids)
+    db.execute(delete(AgentReputationProjection).where(
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v5",
+    ))
+    projections.extend(rebuild_projection_v5(db, agent_id) for agent_id in agent_ids)
     return projections
 
 
@@ -701,6 +709,132 @@ def ensure_projection_version_v4(db: Session) -> None:
             "trust": "70 + sum(member_trust - 70)",
             "risk": "10 + sum(member_risk - 10)",
             "bounds": [0, 100],
+        }))
+
+
+def rebuild_projection_v5(db: Session, agent_id: str) -> AgentReputationProjection:
+    base = rebuild_projection_v4(db, agent_id)
+    members = list((base.details or {}).get("linked_agent_ids") or [agent_id])
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.agent_id.in_(members)
+    ).order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)).all()
+    event_ids = [event.event_id for event in events]
+    references = db.scalars(select(ReputationEventReference).where(
+        ReputationEventReference.event_id.in_(event_ids)
+    )).all() if event_ids else []
+    refs_by_event: dict[str, list[str]] = {}
+    for reference in references:
+        refs_by_event.setdefault(reference.event_id, []).append(reference.referenced_event_id)
+
+    final_disputes = {
+        event.dispute_id for event in events
+        if event.event_type == "JUDGMENT_FINALIZED" and event.dispute_id
+    }
+    appealed_disputes = {
+        event.dispute_id for event in events
+        if event.event_type == "APPEAL_SUBMITTED" and event.dispute_id
+    }
+    provisional_weights = {
+        "satisfied": (1, -1),
+        "partially_satisfied": (-1, 2),
+        "failed": (-4, 6),
+        "fraudulent": (-8, 12),
+        "inconclusive": (0, 2),
+    }
+    trust_delta = risk_delta = 0
+    provisional_impacts = []
+    for event in events:
+        if event.event_type != "JUDGMENT_PROVISIONAL" or event.dispute_id in final_disputes:
+            continue
+        verdict = str(event.event_metadata.get("verdict") or "inconclusive")
+        trust_impact, risk_impact = provisional_weights.get(verdict, (0, 2))
+        lifecycle_status = "appealed" if event.dispute_id in appealed_disputes else "provisional"
+        if lifecycle_status == "appealed":
+            trust_impact = int(trust_impact / 2)
+            risk_impact = int(risk_impact / 2)
+        trust_delta += trust_impact
+        risk_delta += risk_impact
+        provisional_impacts.append({
+            "event_id": event.event_id,
+            "dispute_id": event.dispute_id,
+            "verdict": verdict,
+            "status": lifecycle_status,
+            "trust_impact": trust_impact,
+            "risk_impact": risk_impact,
+            "transaction_hash": event.transaction_hash,
+            "contract_address": event.contract_address,
+        })
+
+    lifecycle_types = {
+        "JUDGMENT_PROVISIONAL", "APPEAL_SUBMITTED", "APPEAL_RESOLVED",
+        "JUDGMENT_UPHELD", "JUDGMENT_OVERTURNED", "JUDGMENT_FINALIZED", "EVENT_SUPERSEDED",
+    }
+    lifecycle = [{
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "dispute_id": event.dispute_id,
+        "verdict": event.event_metadata.get("verdict") or event.event_metadata.get("final_verdict"),
+        "verification_status": event.verification_status,
+        "provenance": event.provenance,
+        "transaction_hash": event.transaction_hash,
+        "contract_address": event.contract_address,
+        "references": refs_by_event.get(event.event_id, []),
+        "occurred_at": event.occurred_at.isoformat(),
+    } for event in events if event.event_type in lifecycle_types]
+
+    trust = max(0, min(100, base.trust_score + trust_delta))
+    risk = max(0, min(100, base.risk_score + risk_delta))
+    status = base.status
+    if status == "active" and (risk >= 35 or any(item["verdict"] in {"failed", "fraudulent"} for item in provisional_impacts)):
+        status = "review"
+    row = db.scalars(select(AgentReputationProjection).where(
+        AgentReputationProjection.agent_id == agent_id,
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v5",
+    )).first()
+    if not row:
+        row = AgentReputationProjection(
+            agent_id=agent_id, projection_name="research_trust", projection_version="v5"
+        )
+        db.add(row)
+    row.trust_score = trust
+    row.risk_score = risk
+    row.status = status
+    row.completed_jobs = base.completed_jobs
+    row.successful_jobs = base.successful_jobs
+    row.disputes = base.disputes
+    row.fraud_incidents = base.fraud_incidents
+    row.last_event_id = events[-1].event_id if events else base.last_event_id
+    row.calculated_at = datetime.utcnow()
+    row.details = {
+        **(base.details or {}),
+        "due_process_projection": True,
+        "base_projection": "research_trust_v4",
+        "provisional_impacts": provisional_impacts,
+        "pending_judgments": len(provisional_impacts),
+        "judgment_lifecycle": lifecycle,
+        "provisional_trust_delta": trust_delta,
+        "provisional_risk_delta": risk_delta,
+    }
+    ensure_projection_version_v5(db)
+    db.flush()
+    return row
+
+
+def ensure_projection_version_v5(db: Session) -> None:
+    existing = db.scalars(select(ProjectionVersion).where(
+        ProjectionVersion.projection_name == "research_trust", ProjectionVersion.version == "v5"
+    )).first()
+    if not existing:
+        db.add(ProjectionVersion(projection_name="research_trust", version="v5", configuration={
+            "base_projection": "research_trust_v4",
+            "provisional_weights": {
+                "satisfied": [1, -1], "partially_satisfied": [-1, 2],
+                "failed": [-4, 6], "fraudulent": [-8, 12], "inconclusive": [0, 2],
+            },
+            "appealed_multiplier_bps": 5000,
+            "finalized_source": "research_trust_v4 finalized judgment weights",
+            "superseded_weight": 0,
         }))
 
 

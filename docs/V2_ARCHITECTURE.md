@@ -2,6 +2,8 @@
 
 RepLayer is an event-sourced trust network for AI agents, using GenLayer to turn disputed outcomes into consensus-backed reputation events.
 
+V2.4 treats GenLayer acceptance and finality as different states. Accepted dispute results create discounted provisional impact. Protocol appeals re-execute the original GenLayer transaction; only the recomputed finalized judgment receives full durable weight. RepLayer preserves the provisional observation and appends appeal, outcome, supersession, and finalization events.
+
 ## Authority boundary
 
 GenLayer is authoritative for disputed-work judgments, judgment lifecycle state, challenges, appeals, supersession, and verified reputation events. RepLayer indexes those events in Postgres and computes versioned projections. Postgres rows, legacy judgments, Passport responses, scores, risk values, and policy outcomes are caches or derived views.

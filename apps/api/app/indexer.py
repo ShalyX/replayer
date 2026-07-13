@@ -129,6 +129,12 @@ class GenLayerEventIndexer:
             db.flush()
             job.status = "disputed"
 
+        if job and dispute and event_type == "APPEAL_SUBMITTED":
+            dispute.status = "appealed"
+            job.status = "appeal_pending"
+        elif job and dispute and event_type == "APPEAL_RESOLVED":
+            dispute.status = "appeal_resolved"
+
         if job and dispute and event_type == "JUDGMENT_FINALIZED":
             verdict = str(metadata.get("verdict") or "inconclusive")
             existing_judgment = db.scalars(select(Judgment).where(Judgment.job_id == job.id)).first()

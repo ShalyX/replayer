@@ -288,6 +288,22 @@ class ReputationEventLedger(gl.Contract):
         if dispute_id in self.disputes:
             raise gl.vm.UserError("[EXPECTED] Dispute already exists")
         self.disputes[dispute_id] = json.dumps(dispute, sort_keys=True)
+        self._append({
+            "event_id": str(dispute["dispute_event_id"]),
+            "event_type": "DISPUTE_OPENED",
+            "agent_id": str(dispute["agent_id"]),
+            "platform_id": str(dispute["platform_id"]),
+            "job_id": str(dispute["job_id"]),
+            "dispute_id": dispute_id,
+            "counterparty_id": str(dispute.get("claimant", "requester")),
+            "category": str(dispute.get("category", "research")),
+            "provenance": "platform_reported",
+            "verification_status": "pending",
+            "evidence_uri": str(dispute.get("evidence_uri", "")),
+            "evidence_hash": str(dispute.get("evidence_hash", "")),
+            "references": dispute.get("references", []),
+            "metadata": {"reason": str(dispute.get("reason", ""))},
+        })
 
         def evaluate() -> str:
             prompt = (
@@ -323,6 +339,7 @@ class ReputationEventLedger(gl.Contract):
         judgment["job_id"] = str(dispute["job_id"])
         judgment["status"] = "provisional"
         judgment["appeal_state"] = "open"
+        judgment["provisional_event_id"] = str(dispute["provisional_event_id"])
         self.judgments[dispute_id] = json.dumps(judgment, sort_keys=True)
         self._append({
             "event_id": str(dispute["provisional_event_id"]),
@@ -336,12 +353,14 @@ class ReputationEventLedger(gl.Contract):
             "verification_status": "provisional",
             "evidence_uri": str(dispute.get("evidence_uri", "")),
             "evidence_hash": str(dispute.get("evidence_hash", "")),
-            "references": dispute.get("references", []),
+            "references": [str(dispute["dispute_event_id"])],
             "metadata": judgment,
         })
 
     @gl.public.write
     def finalize_judgment(self, dispute_id: str, event_id: str, supersedes_event_id: str) -> None:
+        if dispute_id not in self.judgments:
+            raise gl.vm.UserError("[EXPECTED] Unknown judgment")
         judgment = json.loads(self.judgments[dispute_id])
         if str(judgment["status"]) != "provisional":
             raise gl.vm.UserError("[EXPECTED] Judgment is not provisional")
@@ -360,6 +379,96 @@ class ReputationEventLedger(gl.Contract):
             "provenance": "genlayer_verified",
             "verification_status": "finalized",
             "references": [supersedes_event_id],
+            "metadata": judgment,
+        })
+
+    @gl.public.write
+    def record_appeal_resolution(self, appeal_json: str) -> None:
+        appeal = self._object(appeal_json)
+        dispute_id = str(appeal.get("dispute_id", ""))
+        if dispute_id not in self.judgments:
+            raise gl.vm.UserError("[EXPECTED] Unknown judgment")
+        judgment = json.loads(self.judgments[dispute_id])
+        if str(judgment.get("status", "")) not in ["provisional", "appealed"]:
+            raise gl.vm.UserError("[EXPECTED] Judgment is not appealable")
+
+        original_verdict = str(appeal.get("original_verdict", "inconclusive"))
+        final_verdict = str(judgment.get("verdict", "inconclusive"))
+        provisional_event_id = str(appeal["provisional_event_id"])
+        appeal_event_id = str(appeal["appeal_event_id"])
+        resolved_event_id = str(appeal["resolved_event_id"])
+        outcome_event_id = str(appeal["outcome_event_id"])
+        superseded_event_id = str(appeal["superseded_event_id"])
+        final_event_id = str(appeal["final_event_id"])
+        outcome_type = "JUDGMENT_UPHELD" if final_verdict == original_verdict else "JUDGMENT_OVERTURNED"
+        appeal_metadata = {
+            "original_verdict": original_verdict,
+            "final_verdict": final_verdict,
+            "reason": str(appeal.get("reason", "")),
+            "bond_amount": str(appeal.get("bond_amount", "")),
+            "protocol_transaction_hash": str(appeal.get("protocol_transaction_hash", "")),
+            "protocol_status": str(appeal.get("protocol_status", "FINALIZED")),
+            "protocol_round": int(appeal.get("protocol_round", 1)),
+        }
+        common = {
+            "agent_id": str(judgment["agent_id"]),
+            "platform_id": str(judgment["platform_id"]),
+            "job_id": str(judgment["job_id"]),
+            "dispute_id": dispute_id,
+            "category": "research",
+            "evidence_uri": str(appeal.get("evidence_uri", "")),
+            "evidence_hash": str(appeal.get("evidence_hash", "")),
+        }
+        self._append({
+            **common,
+            "event_id": appeal_event_id,
+            "event_type": "APPEAL_SUBMITTED",
+            "provenance": "challenged",
+            "verification_status": "appealed",
+            "references": [provisional_event_id],
+            "metadata": appeal_metadata,
+        })
+        self._append({
+            **common,
+            "event_id": resolved_event_id,
+            "event_type": "APPEAL_RESOLVED",
+            "provenance": "genlayer_verified",
+            "verification_status": "finalized",
+            "references": [provisional_event_id, appeal_event_id],
+            "metadata": appeal_metadata,
+        })
+        self._append({
+            **common,
+            "event_id": outcome_event_id,
+            "event_type": outcome_type,
+            "provenance": "genlayer_verified",
+            "verification_status": "finalized",
+            "references": [provisional_event_id, appeal_event_id, resolved_event_id],
+            "metadata": appeal_metadata,
+        })
+        self._append({
+            **common,
+            "event_id": superseded_event_id,
+            "event_type": "EVENT_SUPERSEDED",
+            "provenance": "superseded",
+            "verification_status": "superseded",
+            "references": [provisional_event_id],
+            "metadata": {"superseded_by": outcome_event_id, **appeal_metadata},
+        })
+        judgment["status"] = "finalized"
+        judgment["appeal_state"] = "resolved"
+        judgment["appeal_outcome"] = "upheld" if outcome_type == "JUDGMENT_UPHELD" else "overturned"
+        judgment["superseded_event_reference"] = provisional_event_id
+        judgment["protocol_transaction_hash"] = appeal_metadata["protocol_transaction_hash"]
+        judgment["protocol_round"] = appeal_metadata["protocol_round"]
+        self.judgments[dispute_id] = json.dumps(judgment, sort_keys=True)
+        self._append({
+            **common,
+            "event_id": final_event_id,
+            "event_type": "JUDGMENT_FINALIZED",
+            "provenance": "genlayer_verified",
+            "verification_status": "finalized",
+            "references": [provisional_event_id, appeal_event_id, resolved_event_id, outcome_event_id],
             "metadata": judgment,
         })
 
@@ -415,6 +524,12 @@ class ReputationEventLedger(gl.Contract):
             return ""
         return self.disputes[dispute_id]
 
+    @gl.public.view
+    def get_judgment(self, dispute_id: str) -> str:
+        if dispute_id not in self.judgments:
+            return ""
+        return self.judgments[dispute_id]
+
     def _append(self, event) -> None:
         event_id = str(event["event_id"])
         if event_id in self.events:
@@ -432,7 +547,9 @@ class ReputationEventLedger(gl.Contract):
         if "block_number" not in event:
             event["block_number"] = 0
         if "occurred_at" not in event:
-            event["occurred_at"] = ""
+            event["occurred_at"] = str(gl.message_raw["datetime"])
+        elif str(event["occurred_at"]) == "":
+            event["occurred_at"] = str(gl.message_raw["datetime"])
         self.events[event_id] = json.dumps(event, sort_keys=True)
         event_count = self.get_event_count()
         self.event_order[str(event_count)] = event_id

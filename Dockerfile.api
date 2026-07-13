@@ -15,6 +15,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requir
 
 COPY . .
 
+RUN npm install --omit=dev --ignore-scripts --no-workspaces --no-audit --no-fund
 RUN chmod +x apps/api/scripts/start_render.sh
 
 CMD ["apps/api/scripts/start_render.sh"]

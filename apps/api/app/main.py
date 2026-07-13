@@ -19,7 +19,7 @@ from .identity import binding_message, normalize_identity, registration_message,
 from .ledger import append_event, event_dict, identity_projection_dict, projection_dict, rebuild_all_identity_projections, rebuild_all_projections, rebuild_identity_projection, rebuild_platform_credibility, rebuild_projection
 from .models import Agent, AgentIdentityProjection, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
 from .schemas import (
-    AgentIdentityRegister, AgentRegister, AttestationConfirm, AttestationCreate, DeliverableSubmit,
+    AgentIdentityRegister, AgentRegister, AppealSubmit, AttestationConfirm, AttestationCreate, DeliverableSubmit,
     DisputeOpen, EventChallenge, IdentityBindingChallenge, IdentityBindingConfirm, IdentityBindingPropose,
     JobCreate, PlatformIdentityVerify, PlatformRegister, TrustEvaluateRequest,
 )
@@ -146,7 +146,7 @@ def read_identity_projection(db: Session, agent_id: str) -> AgentIdentityProject
 
 
 def read_reputation_projection(
-    db: Session, agent_id: str, projection: str = "research_trust_v4"
+    db: Session, agent_id: str, projection: str = "research_trust_v5"
 ) -> AgentReputationProjection:
     projection_name, projection_version = projection.rsplit("_", 1)
     stored = db.scalars(select(AgentReputationProjection).where(
@@ -574,8 +574,8 @@ def accept_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(
     return {"job": job_to_dict(job), "reputation": projection_dict(projection), "tx": tx}
 
 
-@app.post("/jobs/{job_id}/dispute")
-def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+@app.post("/jobs/{job_id}/dispute", response_model=None)
+def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)):
     acquire_ledger_write_lock(db)
     job = require_job(db, job_id)
     deliverable = db.scalars(select(Deliverable).where(Deliverable.job_id == job_id)).first()
@@ -583,6 +583,7 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
     if job.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted jobs can be disputed")
     dispute_id = payload.dispute_id or new_id("disp")
+    dispute_event_id = contract_event_id("dispute_opened", dispute_id)
     provisional_event_id = contract_event_id("provisional", dispute_id)
     tx = genlayer.write("evaluate_dispute", [json.dumps({
         "dispute_id": dispute_id, "job_id": job_id, "agent_id": job.provider_agent_id,
@@ -592,7 +593,7 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
         "deliverable_uri": deliverable.deliverable_uri if deliverable else "",
         "deliverable_summary": deliverable.summary if deliverable else "",
         "evidence_urls": deliverable.evidence_urls if deliverable else [],
-        "provisional_event_id": provisional_event_id, "references": [],
+        "dispute_event_id": dispute_event_id, "provisional_event_id": provisional_event_id, "references": [],
     }, sort_keys=True)])
     dispute = db.get(Dispute, dispute_id)
     if not dispute:
@@ -603,12 +604,179 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
     dispute.evidence_uri = payload.evidence_uri
     dispute.bond_amount = payload.bond_amount
     job.status = "disputed"
-    # The contract's JUDGMENT_PROVISIONAL event is the canonical dispute-bearing
-    # ledger entry. Keeping a second local event would create a competing writer.
-    rebuild_projection(db, job.provider_agent_id)
+    append_event(
+        db, event_id=dispute_event_id, event_type="DISPUTE_OPENED",
+        agent_id=job.provider_agent_id, platform_id=job.platform_id, job_id=job.id,
+        dispute_id=dispute_id, counterparty_id=payload.claimant, category=job.category,
+        provenance="platform_reported", verification_status="pending",
+        evidence_uri=payload.evidence_uri, transaction_hash=tx.get("tx_id") or None,
+        metadata={"reason": payload.reason, "contract_readback_verified": False},
+    )
+    provisional = genlayer.call_json("get_event", [provisional_event_id])
+    if not (isinstance(provisional, dict) and provisional.get("metadata")):
+        rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
+        db.commit()
+        db.refresh(dispute)
+        return JSONResponse(status_code=202, content={
+            "dispute": dispute_to_dict(dispute), "tx": tx, "judgment_status": "pending",
+        })
+    opened = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == dispute_event_id)).first()
+    opened.contract_address = genlayer.contract_address
+    opened.event_metadata = {**opened.event_metadata, "contract_readback_verified": True}
+    append_event(
+        db, event_id=provisional_event_id, event_type="JUDGMENT_PROVISIONAL",
+        agent_id=job.provider_agent_id, platform_id=job.platform_id, job_id=job.id,
+        dispute_id=dispute_id, counterparty_id=payload.claimant, category=job.category,
+        provenance="genlayer_provisional", verification_status="provisional",
+        evidence_uri=payload.evidence_uri, contract_address=genlayer.contract_address,
+        transaction_hash=tx.get("tx_id") or None,
+        references=provisional.get("references", []),
+        metadata={**provisional["metadata"], "contract_readback_verified": True},
+    )
+    rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
     db.commit()
     db.refresh(dispute)
     return {"dispute": dispute_to_dict(dispute), "tx": tx}
+
+
+@app.post("/jobs/{job_id}/appeal")
+def appeal_job(job_id: str, payload: AppealSubmit, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
+    dispute = db.scalars(select(Dispute).where(Dispute.job_id == job_id)).first()
+    if not dispute:
+        raise HTTPException(status_code=409, detail="Job has no appealable dispute")
+    provisional_event_id = contract_event_id("provisional", dispute.id)
+    provisional = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == provisional_event_id)).first()
+    if not provisional:
+        opened = db.scalars(select(ReputationEvent).where(
+            ReputationEvent.event_id == contract_event_id("dispute_opened", dispute.id)
+        )).first()
+        contract_provisional = genlayer.call_json("get_event", [provisional_event_id])
+        if opened and opened.transaction_hash and isinstance(contract_provisional, dict) and contract_provisional.get("metadata"):
+            provisional = append_event(
+                db, event_id=provisional_event_id, event_type="JUDGMENT_PROVISIONAL",
+                agent_id=job.provider_agent_id, platform_id=job.platform_id, job_id=job.id,
+                dispute_id=dispute.id, counterparty_id=dispute.claimant, category=job.category,
+                provenance="genlayer_provisional", verification_status="provisional",
+                evidence_uri=dispute.evidence_uri, contract_address=genlayer.contract_address,
+                transaction_hash=opened.transaction_hash,
+                references=contract_provisional.get("references", []),
+                metadata={**contract_provisional["metadata"], "contract_readback_verified": True},
+            )
+            opened.contract_address = genlayer.contract_address
+            opened.event_metadata = {**opened.event_metadata, "contract_readback_verified": True}
+    if not provisional or not provisional.transaction_hash:
+        raise HTTPException(status_code=409, detail="Provisional GenLayer judgment has not been indexed")
+    appeal_event_id = contract_event_id("appeal", dispute.id)
+    if db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == appeal_event_id)).first():
+        raise HTTPException(status_code=409, detail="An appeal has already been submitted")
+    provisional_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v5"))
+    try:
+        protocol = genlayer.appeal_transaction(provisional.transaction_hash, payload.bond_amount)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=clean_runtime_error(str(exc))) from exc
+    event = append_event(
+        db, event_id=appeal_event_id, event_type="APPEAL_SUBMITTED",
+        agent_id=job.provider_agent_id, platform_id=job.platform_id, job_id=job.id,
+        dispute_id=dispute.id, counterparty_id=payload.appellant_id, category=job.category,
+        provenance="challenged", verification_status="appealed",
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        transaction_hash=protocol.get("appeal_submission_hash") or provisional.transaction_hash,
+        references=[provisional_event_id],
+        metadata={
+            "original_verdict": str(provisional.event_metadata.get("verdict", "inconclusive")),
+            "reason": payload.reason, "bond_amount": payload.bond_amount,
+            "protocol_transaction_hash": provisional.transaction_hash,
+            "protocol_status": protocol.get("status", "UNKNOWN"),
+            "protocol_round": int(protocol.get("round", 1)),
+        },
+    )
+    dispute.status = "appealed"
+    job.status = "appeal_pending"
+    appealed_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v5"))
+    db.commit()
+    return {"appeal": event_dict(db, event), "protocol": protocol,
+            "provisional_reputation": provisional_reputation,
+            "appealed_reputation": appealed_reputation}
+
+
+@app.post("/jobs/{job_id}/appeal/resolve")
+def resolve_job_appeal(job_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    job = require_job(db, job_id)
+    authorize_platform(auth, job.platform_id)
+    dispute = db.scalars(select(Dispute).where(Dispute.job_id == job_id)).first()
+    if not dispute:
+        raise HTTPException(status_code=409, detail="Job has no appealed dispute")
+    provisional_event_id = contract_event_id("provisional", dispute.id)
+    appeal_event_id = contract_event_id("appeal", dispute.id)
+    provisional = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == provisional_event_id)).first()
+    appeal = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == appeal_event_id)).first()
+    if not provisional or not appeal:
+        raise HTTPException(status_code=409, detail="Appeal has not been submitted")
+    existing_final = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == contract_event_id("appeal_final", dispute.id)
+    )).first()
+    if existing_final:
+        raise HTTPException(status_code=409, detail="Appeal has already been resolved")
+    protocol_tx = str(appeal.event_metadata.get("protocol_transaction_hash") or provisional.transaction_hash or "")
+    protocol = genlayer.transaction_status(protocol_tx)
+    if protocol["status"] == "READY_TO_FINALIZE":
+        protocol = genlayer.finalize_transaction(protocol_tx)
+    if protocol["status"] != "FINALIZED":
+        raise HTTPException(status_code=409, detail=f"GenLayer appeal is not final: {protocol['status']}")
+    current = genlayer.call_json("get_judgment", [dispute.id])
+    if not isinstance(current, dict) or not current.get("verdict"):
+        raise RuntimeError("Final GenLayer judgment could not be read from contract state")
+    resolved_event_id = contract_event_id("appeal_resolved", dispute.id)
+    outcome_event_id = contract_event_id("appeal_outcome", dispute.id)
+    superseded_event_id = contract_event_id("appeal_superseded", dispute.id)
+    final_event_id = contract_event_id("appeal_final", dispute.id)
+    resolution_payload = {
+        "dispute_id": dispute.id, "provisional_event_id": provisional_event_id,
+        "appeal_event_id": appeal_event_id, "resolved_event_id": resolved_event_id,
+        "outcome_event_id": outcome_event_id, "superseded_event_id": superseded_event_id,
+        "final_event_id": final_event_id,
+        "original_verdict": str(appeal.event_metadata.get("original_verdict", "inconclusive")),
+        "reason": str(appeal.event_metadata.get("reason", "")),
+        "bond_amount": str(appeal.event_metadata.get("bond_amount", "")),
+        "evidence_uri": appeal.evidence_uri or "", "evidence_hash": appeal.evidence_hash or "",
+        "protocol_transaction_hash": protocol_tx, "protocol_status": protocol["status"],
+        "protocol_round": int(protocol.get("round", 1)),
+    }
+    ledger_tx = genlayer.write("record_appeal_resolution", [json.dumps(resolution_payload, sort_keys=True)])
+    indexer.sync_once(db)
+    final_event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == final_event_id)).first()
+    if not final_event:
+        raise RuntimeError(f"Final appeal judgment is pending. Tx: {ledger_tx.get('tx_id', '')}")
+    final_event.transaction_hash = protocol_tx
+    final_event.contract_address = genlayer.contract_address
+    final_event.event_metadata = {
+        **final_event.event_metadata, "contract_readback_verified": True,
+        "ledger_record_transaction_hash": ledger_tx.get("tx_id") or "",
+    }
+    verdict = str(final_event.event_metadata.get("verdict") or current["verdict"])
+    judgment = db.scalars(select(Judgment).where(Judgment.job_id == job_id)).first()
+    if not judgment:
+        judgment = Judgment(id=new_id("judgment"), job_id=job_id, dispute_id=dispute.id, verdict=verdict)
+        db.add(judgment)
+    judgment.verdict = verdict
+    judgment.confidence_bps = int(final_event.event_metadata.get("confidence_bps") or 0)
+    judgment.reasoning_summary = str(final_event.event_metadata.get("reasoning_summary") or "")
+    judgment.source = "genlayer"
+    judgment.contract_address = genlayer.contract_address
+    judgment.tx_hash = protocol_tx
+    judgment.verify_url = genlayer.verify_url(protocol_tx)
+    dispute.status = "resolved"
+    job.status = f"judged_{verdict}"
+    projection = rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
+    db.commit()
+    outcome = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == outcome_event_id)).first()
+    return {"judgment": judgment_to_dict(judgment), "outcome": event_dict(db, outcome),
+            "event": event_dict(db, final_event), "reputation": projection_dict(projection),
+            "protocol": protocol, "ledger_tx": ledger_tx}
 
 
 @app.post("/jobs/{job_id}/evaluate")
@@ -622,6 +790,10 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
         raise HTTPException(status_code=409, detail="Job needs a deliverable and open dispute")
     if db.scalars(select(Judgment).where(Judgment.job_id == job_id)).first():
         raise HTTPException(status_code=409, detail="Job already evaluated")
+    if db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_type == "APPEAL_SUBMITTED", ReputationEvent.dispute_id == dispute.id
+    )).first():
+        raise HTTPException(status_code=409, detail="Appealed judgments must use the appeal resolution endpoint")
 
     genlayer.require_live()
     provisional_event_id = contract_event_id("provisional", dispute.id)
@@ -633,6 +805,16 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
         time.sleep(settings.genlayer_read_interval_seconds)
     if not (isinstance(provisional, dict) and provisional.get("metadata")):
         raise RuntimeError(f"GenLayer provisional judgment is still pending for job {job_id}")
+    provisional_row = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == provisional_event_id
+    )).first()
+    if not provisional_row or not provisional_row.transaction_hash:
+        raise HTTPException(status_code=409, detail="Provisional judgment transaction provenance is missing")
+    protocol = genlayer.transaction_status(provisional_row.transaction_hash)
+    if protocol["status"] == "READY_TO_FINALIZE":
+        protocol = genlayer.finalize_transaction(provisional_row.transaction_hash)
+    if protocol["status"] != "FINALIZED":
+        raise HTTPException(status_code=409, detail=f"GenLayer judgment is not final: {protocol['status']}")
     final_event_id = contract_event_id("final", dispute.id)
     resolve_tx = genlayer.write("finalize_judgment", [dispute.id, final_event_id, provisional_event_id])
     if not resolve_tx.get("tx_id"):
@@ -662,8 +844,8 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
     judgment.score_deltas = result["score_deltas"]
     judgment.source = "genlayer"
     judgment.contract_address = genlayer.contract_address
-    judgment.tx_hash = resolve_tx["tx_id"]
-    judgment.verify_url = genlayer.verify_url(resolve_tx["tx_id"])
+    judgment.tx_hash = provisional_row.transaction_hash
+    judgment.verify_url = genlayer.verify_url(provisional_row.transaction_hash)
     dispute.status = "resolved"
     job.status = f"judged_{result['verdict']}"
     judgment_event = append_event(
@@ -672,9 +854,12 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
         counterparty_id=dispute.claimant, category=job.category,
         provenance="genlayer_verified", verification_status="finalized",
         evidence_uri=dispute.evidence_uri, contract_address=genlayer.contract_address,
-        transaction_hash=resolve_tx["tx_id"],
+        transaction_hash=provisional_row.transaction_hash,
+        references=[provisional_event_id],
         metadata={"verdict": result["verdict"], "confidence_bps": result["confidence_bps"],
-                  "reasoning_summary": result["reasoning_summary"], "contract_readback_verified": True},
+                  "reasoning_summary": result["reasoning_summary"], "contract_readback_verified": True,
+                  "protocol_status": protocol["status"], "protocol_round": protocol.get("round", 0),
+                  "ledger_record_transaction_hash": resolve_tx["tx_id"]},
     )
     projection = rebuild_projection(db, job.provider_agent_id)
     db.commit()
@@ -737,7 +922,7 @@ def register_agent_identity(agent_id: str, payload: AgentIdentityRegister, db: S
         metadata={**metadata, "contract_readback_verified": True},
     )
     projection = rebuild_identity_projection(db, agent_id)
-    reputation = rebuild_projection(db, agent_id, "research_trust_v4")
+    reputation = rebuild_projection(db, agent_id, "research_trust_v5")
     db.commit()
     return {"event": event_dict(db, event), "identity": identity_projection_dict(projection),
             "reputation": projection_dict(reputation), "tx": tx}
@@ -837,8 +1022,8 @@ def confirm_identity_binding(proposal_event_id: str, payload: IdentityBindingCon
         raise RuntimeError("GenLayer identity link was not indexed")
     rebuild_all_identity_projections(db)
     source_identity = rebuild_identity_projection(db, source.id)
-    source_reputation = rebuild_projection(db, source.id, "research_trust_v4")
-    rebuild_projection(db, target.id, "research_trust_v4")
+    source_reputation = rebuild_projection(db, source.id, "research_trust_v5")
+    rebuild_projection(db, target.id, "research_trust_v5")
     db.commit()
     return {"link": event_dict(db, link), "identity": identity_projection_dict(source_identity),
             "reputation": projection_dict(source_reputation), "tx": tx}
@@ -1026,10 +1211,10 @@ def challenge_attestation(event_id: str, payload: EventChallenge, db: Session = 
 
 
 @app.get("/agents/{agent_id}/reputation")
-def get_reputation(agent_id: str, projection: str = "research_trust_v4", db: Session = Depends(get_db)) -> dict:
+def get_reputation(agent_id: str, projection: str = "research_trust_v5", db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4"}:
+    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4", "research_trust_v5"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
     result = read_reputation_projection(db, agent_id, projection)
     db.commit()
@@ -1118,7 +1303,7 @@ def rebuild_projections(db: Session = Depends(get_db)) -> dict:
     identity_count = db.scalar(select(func.count()).select_from(AgentIdentityProjection)) or 0
     return {"rebuilt": len(projections) + identity_count,
             "projections": ["research_trust_v1", "research_trust_v2", "research_trust_v3",
-                            "research_trust_v4", "platform_credibility_v1", "agent_identity_v1"]}
+                            "research_trust_v4", "research_trust_v5", "platform_credibility_v1", "agent_identity_v1"]}
 
 
 @app.post("/trust/evaluate", dependencies=[Depends(require_key)])
@@ -1127,7 +1312,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v4")
+    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v5")
     judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
     fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
     fraud_incidents = reputation.fraud_incidents
@@ -1237,7 +1422,12 @@ def ledger_timeline_event(db: Session, event: ReputationEvent) -> dict:
         "JOB_ACCEPTED": "Job accepted",
         "DISPUTE_OPENED": "Dispute opened",
         "JUDGMENT_PROVISIONAL": "GenLayer judgment provisional",
+        "APPEAL_SUBMITTED": "GenLayer protocol appeal submitted",
+        "APPEAL_RESOLVED": "GenLayer appeal resolved",
+        "JUDGMENT_UPHELD": "Judgment upheld",
+        "JUDGMENT_OVERTURNED": "Judgment overturned",
         "JUDGMENT_FINALIZED": "GenLayer judgment finalized",
+        "EVENT_SUPERSEDED": "Prior judgment superseded",
         "FRAUD_CONFIRMED": "Fraud confirmed",
         "POLICY_EVALUATED": "Marketplace policy evaluated",
     }
@@ -1251,7 +1441,7 @@ def ledger_timeline_event(db: Session, event: ReputationEvent) -> dict:
         "marker": "!" if danger else "✓",
         "title": titles.get(event.event_type, event.event_type.replace("_", " ").title()),
         "detail": event.event_metadata.get("reasoning_summary") or event.event_metadata.get("reason") or verdict,
-        "severity": "danger" if danger else "warning" if event.verification_status in {"pending", "provisional"} else "success",
+        "severity": "danger" if danger else "warning" if event.verification_status in {"pending", "provisional", "appealed"} else "success",
         "verify_url": genlayer.verify_url(event.transaction_hash) if event.transaction_hash else "",
         "provenance": event.provenance,
         "verification_status": event.verification_status,

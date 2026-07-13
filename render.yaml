@@ -21,7 +21,9 @@ services:
       - key: ALLOW_TEST_MOCKS
         value: "false"
       - key: GENLAYER_CONTRACT_ADDRESS
-        value: 0x2E7017a0Ae4567b3398EC5C836913dce745F727e
+        value: 0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A
+      - key: GENLAYER_NETWORK
+        value: studionet
       - key: GENLAYER_ACCOUNT_PASSWORD
         generateValue: true
       - key: GENLAYER_ACCOUNT_NAME
@@ -37,11 +39,11 @@ services:
       - key: GENLAYER_INDEXER_POLL_INTERVAL
         value: "15"
       - key: GENLAYER_PROOF_EVENT_ID
-        value: rep_evt_final_3ed80733353e5dfae9617a9d
+        value: rep_evt_appeal_final_4ecce3b57968ca52d795254e
       - key: GENLAYER_PROOF_TRANSACTION_HASH
-        value: 0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6
+        value: 0xc46455b2b51fecd23b4182092a7d11f9656c71ceb888c6dc6d9aa6cf84c15610
       - key: GENLAYER_PROOF_TRANSACTIONS_JSON
-        value: '{"rep_evt_v23_probe_judgment_1783936853":"0x369f8d03207ba45626e40dd6b273c2cfad301ebfbd800d0bbd0278ba9e42a34e"}'
+        value: '{"rep_evt_appeal_final_4ecce3b57968ca52d795254e":"0xc46455b2b51fecd23b4182092a7d11f9656c71ceb888c6dc6d9aa6cf84c15610"}'
 
 databases:
   - name: replayer-postgres

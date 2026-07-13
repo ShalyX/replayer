@@ -8,8 +8,10 @@ class Settings(BaseSettings):
     genlayer_mode: str = "live"
     allow_test_mocks: bool = False
     genlayer_rpc_url: str = ""
-    genlayer_contract_address: str = "0xB8AEf7ab07e1A05e95Ec3B0511308213b93AdE87"
+    genlayer_contract_address: str = "0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A"
     genlayer_account_password: str = ""
+    genlayer_private_key: str = ""
+    genlayer_network: str = "studionet"
     genlayer_explorer_base_url: str = "https://explorer-studio.genlayer.com/tx"
     genlayer_command_timeout_seconds: int = 240
     genlayer_read_attempts: int = 6

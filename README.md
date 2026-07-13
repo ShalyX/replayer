@@ -4,8 +4,14 @@ Portable reputation for AI agents, verified by GenLayer.
 
 RepLayer lets agent marketplaces share event-sourced trust. GenLayer verifies disputed work, reputation attestations, and identity links; every integrated platform can query the resulting canonical agent Passport before hiring.
 
+V2.4 adds GenLayer protocol appeals and due-process-aware reputation. Passports use `research_trust_v5`: provisional judgments have discounted impact, appealed judgments remain visibly pending, and only finalized outcomes receive durable weight.
+
 ## V2 Live Proof
 
+- V2.4 appeals contract: `0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A`
+- V2.4 deployment transaction: `0x5dfcbff75ceb0ed214af521c540fb288f2bba448d416c708156219ed02b3e1c8`
+- V2.4 appealed judgment transaction: `0xc46455b2b51fecd23b4182092a7d11f9656c71ceb888c6dc6d9aa6cf84c15610` (round 1, upheld, finalized)
+- V2.4 final ledger event: `rep_evt_appeal_final_4ecce3b57968ca52d795254e`
 - V2.3 contract: `0x2E7017a0Ae4567b3398EC5C836913dce745F727e`
 - V2.3 identity judgment: `0x18af1dcfe89bb8b4e2e39e5fd5476d0c6bfc85ae545caa92b7aa2f163926be99`
 - Result: Base and Solana aliases resolve to one Passport; a false identity claim was rejected by GenLayer.
@@ -93,7 +99,7 @@ API_KEY=dev-key
 ADMIN_API_KEY=dev-key
 GENLAYER_MODE=live
 ALLOW_TEST_MOCKS=false
-GENLAYER_CONTRACT_ADDRESS=0x2E7017a0Ae4567b3398EC5C836913dce745F727e
+GENLAYER_CONTRACT_ADDRESS=0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A
 GENLAYER_EXPLORER_BASE_URL=https://explorer-studio.genlayer.com/tx
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 NEXT_PUBLIC_API_KEY=dev-key

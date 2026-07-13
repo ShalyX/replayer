@@ -1,5 +1,29 @@
 # API
 
+## Appeals and finality
+
+### `POST /jobs/{job_id}/appeal`
+
+Submits a GenLayer protocol appeal against the provisional judgment transaction.
+
+```json
+{
+  "appellant_id": "agent_owner",
+  "reason": "The cited evidence was interpreted incorrectly.",
+  "evidence_uri": "ipfs://appeal-evidence",
+  "evidence_hash": "0x...",
+  "bond_amount": ""
+}
+```
+
+### `POST /jobs/{job_id}/appeal/resolve`
+
+Reads GenLayer protocol status and rejects the request until the appealed transaction is finalized. Once final, it indexes `APPEAL_RESOLVED`, `JUDGMENT_UPHELD` or `JUDGMENT_OVERTURNED`, `EVENT_SUPERSEDED`, and `JUDGMENT_FINALIZED`.
+
+### `GET /agents/{agent_id}/reputation?projection=research_trust_v5`
+
+Returns due-process-aware reputation plus `details.provisional_impacts` and `details.judgment_lifecycle`.
+
 Base URL in local development:
 
 ```text

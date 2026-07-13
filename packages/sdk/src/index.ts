@@ -265,6 +265,27 @@ export type DisputeInput = {
   bond_amount?: number;
 };
 
+export type AppealInput = {
+  appellant_id?: string;
+  reason: string;
+  evidence_uri: string;
+  evidence_hash?: string;
+  bond_amount?: string;
+};
+
+export type JudgmentLifecycleEvent = {
+  event_id: string;
+  event_type: "JUDGMENT_PROVISIONAL" | "APPEAL_SUBMITTED" | "APPEAL_RESOLVED" | "JUDGMENT_UPHELD" | "JUDGMENT_OVERTURNED" | "JUDGMENT_FINALIZED" | "EVENT_SUPERSEDED";
+  dispute_id: string;
+  verdict?: string;
+  verification_status: VerificationStatus;
+  provenance: EventProvenance;
+  transaction_hash?: string;
+  contract_address?: string;
+  references: string[];
+  occurred_at: string;
+};
+
 export type TrustPolicy = {
   min_trust_score?: number;
   max_risk_score?: number;
@@ -391,6 +412,14 @@ export class AgentReputationClient {
     return this.request(`/jobs/${encodeURIComponent(jobId)}/evaluate`, "POST", {});
   }
 
+  appealJob(jobId: string, input: AppealInput) {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/appeal`, "POST", input);
+  }
+
+  resolveJobAppeal(jobId: string) {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/appeal/resolve`, "POST", {});
+  }
+
   createAttestation(input: AttestationInput) {
     return this.request("/attestations", "POST", input);
   }
@@ -404,7 +433,7 @@ export class AgentReputationClient {
   }
 
   getReputation(agentId: string): Promise<Reputation> {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v4`, "GET");
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v5`, "GET");
   }
 
   getAgentEvents(agentId: string, options: { limit?: number } = {}): Promise<{ agent_id: string; events: ReputationEvent[] }> {
@@ -416,7 +445,7 @@ export class AgentReputationClient {
     return this.request(`/events/${encodeURIComponent(eventId)}`, "GET");
   }
 
-  getAgentReputation(agentId: string, projection = "research_trust_v4"): Promise<ReputationProjection> {
+  getAgentReputation(agentId: string, projection = "research_trust_v5"): Promise<ReputationProjection> {
     return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=${encodeURIComponent(projection)}`, "GET");
   }
 

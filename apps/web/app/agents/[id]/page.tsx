@@ -38,6 +38,10 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
     event_id: string; type: string; value: number; platform_id: string;
     provenance: string; verification_status: string; contribution: number; issuer_credibility_bps?: number;
   }>;
+  const judgmentLifecycle = (profile.reputation.details?.judgment_lifecycle || []) as Array<{
+    event_id: string; event_type: string; dispute_id: string; verdict?: string;
+    verification_status: string; provenance: string; transaction_hash?: string;
+  }>;
 
   return (
     <main className="shell">
@@ -65,6 +69,29 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       </section>
 
       <section className="grid section-gap">
+        <section className="panel">
+          <h2>Appeals and Due Process</h2>
+          <table className="table">
+            <thead><tr><th>Stage</th><th>Verdict</th><th>Status</th><th>Provenance</th></tr></thead>
+            <tbody>
+              {judgmentLifecycle.map((item) => (
+                <tr key={item.event_id}>
+                  <td>{item.event_type.replaceAll("_", " ")}</td>
+                  <td>{item.verdict || "Pending"}</td>
+                  <td><span className={item.verification_status === "superseded" ? "pill bad" : "pill"}>{item.verification_status}</span></td>
+                  <td>
+                    {item.transaction_hash ? (
+                      <a href={`https://explorer-studio.genlayer.com/tx/${item.transaction_hash}`} target="_blank" rel="noreferrer">
+                        {item.provenance.replaceAll("_", " ")}
+                      </a>
+                    ) : item.provenance.replaceAll("_", " ")}
+                  </td>
+                </tr>
+              ))}
+              {judgmentLifecycle.length === 0 ? <tr><td colSpan={4}>No disputed judgments.</td></tr> : null}
+            </tbody>
+          </table>
+        </section>
         <section className="panel">
           <h2>Canonical Identity</h2>
           <table className="table">
