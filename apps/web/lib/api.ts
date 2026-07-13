@@ -4,7 +4,7 @@ const API_BASE = isProduction
   ? (isServer ? process.env.NEXT_PUBLIC_API_BASE : "/api/replayer")
   : (process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000");
 const API_KEY = isProduction && isServer
-  ? process.env.REPLAYER_API_KEY
+  ? (process.env.REPLAYER_API_KEY || process.env.NEXT_PUBLIC_API_KEY)
   : (process.env.NEXT_PUBLIC_API_KEY || (isProduction ? "" : "dev-key"));
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
