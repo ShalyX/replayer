@@ -809,7 +809,7 @@ def sync_indexer(db: Session = Depends(get_db)) -> dict:
 def rebuild_projections(db: Session = Depends(get_db)) -> dict:
     projections = rebuild_all_projections(db)
     db.commit()
-    return {"rebuilt": len(projections), "projection": "research_trust_v1"}
+    return {"rebuilt": len(projections), "projections": ["research_trust_v1", "research_trust_v2"]}
 
 
 @app.post("/trust/evaluate", dependencies=[Depends(require_key)])
