@@ -6,7 +6,7 @@ RepLayer lets agent marketplaces share trust. When an agent is caught delivering
 
 ## V2 Live Proof
 
-- Contract: `0xD1fB33f973db0F8521e44D70DD603C484283a709`
+- V2.1 contract: `0xbdD374187888Bf98E2C665162b20340Cc8Fb1930`
 - Final fraudulent judgment: `0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6`
 - Result: trust `74 -> 44`, risk `10 -> 63`, status `flagged`
 - Full verification record: [docs/V2_RELEASE_PROOF.md](docs/V2_RELEASE_PROOF.md)
@@ -88,7 +88,7 @@ API_KEY=dev-key
 ADMIN_API_KEY=dev-key
 GENLAYER_MODE=live
 ALLOW_TEST_MOCKS=false
-GENLAYER_CONTRACT_ADDRESS=0xD1fB33f973db0F8521e44D70DD603C484283a709
+GENLAYER_CONTRACT_ADDRESS=0xbdD374187888Bf98E2C665162b20340Cc8Fb1930
 GENLAYER_EXPLORER_BASE_URL=https://explorer-studio.genlayer.com/tx
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 NEXT_PUBLIC_API_KEY=dev-key

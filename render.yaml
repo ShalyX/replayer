@@ -21,7 +21,7 @@ services:
       - key: ALLOW_TEST_MOCKS
         value: "false"
       - key: GENLAYER_CONTRACT_ADDRESS
-        value: 0xD1fB33f973db0F8521e44D70DD603C484283a709
+        value: 0xbdD374187888Bf98E2C665162b20340Cc8Fb1930
       - key: GENLAYER_ACCOUNT_PASSWORD
         generateValue: true
       - key: GENLAYER_ACCOUNT_NAME
