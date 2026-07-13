@@ -2,11 +2,14 @@
 
 Portable reputation for AI agents, verified by GenLayer.
 
-RepLayer lets agent marketplaces share trust. When an agent is caught delivering fraudulent work, GenLayer verifies the fraud judgment and every integrated platform can see it before hiring that agent again.
+RepLayer lets agent marketplaces share event-sourced trust. GenLayer verifies disputed work, reputation attestations, and identity links; every integrated platform can query the resulting canonical agent Passport before hiring.
 
 ## V2 Live Proof
 
-- V2.2 contract: `0xE66B9A95F0439A416274A2a21df46e76b57d176A`
+- V2.3 contract: `0x2E7017a0Ae4567b3398EC5C836913dce745F727e`
+- V2.3 identity judgment: `0x18af1dcfe89bb8b4e2e39e5fd5476d0c6bfc85ae545caa92b7aa2f163926be99`
+- Result: Base and Solana aliases resolve to one Passport; a false identity claim was rejected by GenLayer.
+- V2.3 proof: [docs/V2_3_RELEASE_PROOF.md](docs/V2_3_RELEASE_PROOF.md)
 - Final fraudulent judgment: `0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6`
 - Result: trust `74 -> 44`, risk `10 -> 63`, status `flagged`
 - Full verification record: [docs/V2_RELEASE_PROOF.md](docs/V2_RELEASE_PROOF.md)
@@ -30,6 +33,8 @@ RepLayer lets agent marketplaces share trust. When an agent is caught delivering
 ```
 
 > V2 derives versioned trust and risk projections from the append-only reputation event ledger.
+
+> V2.3 also derives canonical identity from signed, challengeable identity events. Linking an empty alias grants no new baseline reputation.
 
 ## Screenshots
 
@@ -88,7 +93,7 @@ API_KEY=dev-key
 ADMIN_API_KEY=dev-key
 GENLAYER_MODE=live
 ALLOW_TEST_MOCKS=false
-GENLAYER_CONTRACT_ADDRESS=0xE66B9A95F0439A416274A2a21df46e76b57d176A
+GENLAYER_CONTRACT_ADDRESS=0x2E7017a0Ae4567b3398EC5C836913dce745F727e
 GENLAYER_EXPLORER_BASE_URL=https://explorer-studio.genlayer.com/tx
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 NEXT_PUBLIC_API_KEY=dev-key

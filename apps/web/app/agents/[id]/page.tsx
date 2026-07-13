@@ -5,6 +5,15 @@ import { api } from "../../../lib/api";
 
 type Profile = {
   agent: { id: string; name: string; platform_id: string; capabilities: string[]; status: string };
+  requested_alias?: { id: string; name: string; platform_id: string };
+  identity: {
+    canonical_agent_id: string;
+    status: string;
+    linked_agents: string[];
+    aliases: string[];
+    controllers: string[];
+    projection: string;
+  };
   reputation: any;
   jobs: Array<{ id: string; status: string; task_spec: string; category: string }>;
   disputes: Array<{ id: string; job_id: string; reason: string; status: string }>;
@@ -56,6 +65,18 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       </section>
 
       <section className="grid section-gap">
+        <section className="panel">
+          <h2>Canonical Identity</h2>
+          <table className="table">
+            <tbody>
+              <tr><th>Canonical agent</th><td>{profile.identity.canonical_agent_id}</td></tr>
+              <tr><th>Identity status</th><td><span className="pill">{profile.identity.status}</span></td></tr>
+              <tr><th>Projection</th><td>{profile.identity.projection}</td></tr>
+              <tr><th>Linked platform agents</th><td>{profile.identity.linked_agents.join(", ")}</td></tr>
+              <tr><th>Verified aliases</th><td>{profile.identity.aliases.join(", ")}</td></tr>
+            </tbody>
+          </table>
+        </section>
         <section className="panel">
           <h2>Verified Work History</h2>
           <table className="table">

@@ -8,8 +8,8 @@ from .config import settings
 
 
 class GenLayerClient:
-    def __init__(self) -> None:
-        self.contract_address = settings.genlayer_contract_address
+    def __init__(self, contract_address: str | None = None) -> None:
+        self.contract_address = contract_address or settings.genlayer_contract_address
         self.mode = settings.genlayer_mode
         self.password = settings.genlayer_account_password
 

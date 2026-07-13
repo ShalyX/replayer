@@ -12,6 +12,7 @@ from app.genlayer import GenLayerClient
 Base.metadata.create_all(engine)
 errors = []
 client = GenLayerClient()
+clients = {client.contract_address.lower(): client}
 quarantined = 0
 authoritative = 0
 with SessionLocal() as db:
@@ -30,7 +31,10 @@ with SessionLocal() as db:
             errors.append(f"{event.event_id}: GenLayer provenance missing contract/transaction")
         if event.contract_address:
             try:
-                contract_event = client.call_json("get_event", [event.event_id])
+                event_client = clients.setdefault(
+                    event.contract_address.lower(), GenLayerClient(contract_address=event.contract_address)
+                )
+                contract_event = event_client.call_json("get_event", [event.event_id])
             except RuntimeError as exc:
                 errors.append(f"{event.event_id}: contract read failed: {exc}")
                 continue

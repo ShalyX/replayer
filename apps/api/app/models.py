@@ -231,6 +231,23 @@ class PlatformCredibilityProjection(Base):
     details: Mapped[dict] = mapped_column(JsonType, default=dict)
 
 
+class AgentIdentityProjection(Base):
+    __tablename__ = "agent_identity_projections"
+    __table_args__ = (UniqueConstraint("agent_id", "projection_version", name="uq_agent_identity_projection"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("identity_projection"))
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    canonical_agent_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    projection_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+    status: Mapped[str] = mapped_column(String(40), default="unlinked")
+    linked_agents: Mapped[list] = mapped_column(JsonType, default=list)
+    aliases: Mapped[list] = mapped_column(JsonType, default=list)
+    controllers: Mapped[list] = mapped_column(JsonType, default=list)
+    last_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    details: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+
 class DemoRun(Base):
     __tablename__ = "demo_runs"
 

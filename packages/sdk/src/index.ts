@@ -16,6 +16,52 @@ export type Reputation = {
 export type EventProvenance = "platform_reported" | "counterparty_confirmed" | "genlayer_provisional" | "genlayer_verified" | "challenged" | "superseded";
 export type VerificationStatus = "pending" | "provisional" | "finalized" | "appealed" | "superseded" | "uncontested";
 
+export type AgentIdentityProjection = {
+  agent_id: string;
+  canonical_agent_id: string;
+  projection: "agent_identity_v1";
+  projection_version: "v1";
+  status: "unlinked" | "verified" | "linked";
+  linked_agents: string[];
+  aliases: string[];
+  controllers: string[];
+  last_event_id: string | null;
+  calculated_at: string;
+  details: Record<string, unknown>;
+};
+
+export type AgentIdentityRegistrationInput = {
+  identity: string;
+  nonce: string;
+  signature: string;
+  evidence_uri?: string;
+  evidence_hash?: string;
+};
+
+export type IdentityBindingProposalInput = {
+  source_agent_id: string;
+  target_agent_id: string;
+  source_identity: string;
+  target_identity: string;
+  nonce: string;
+  source_signature: string;
+  evidence_uri?: string;
+  evidence_hash?: string;
+};
+
+export type IdentityBindingConfirmationInput = {
+  target_signature: string;
+  evidence_uri?: string;
+  evidence_hash?: string;
+};
+
+export type IdentityBindingChallengeInput = {
+  challenger_agent_id: string;
+  reason: string;
+  evidence_uri: string;
+  evidence_hash?: string;
+};
+
 export type AttestationInput = {
   agent_id: string;
   platform_id: string;
@@ -301,6 +347,30 @@ export class AgentReputationClient {
     return this.request("/agents/register", "POST", input);
   }
 
+  registerAgentIdentity(agentId: string, input: AgentIdentityRegistrationInput) {
+    return this.request(`/agents/${encodeURIComponent(agentId)}/identities`, "POST", input);
+  }
+
+  proposeIdentityBinding(input: IdentityBindingProposalInput) {
+    return this.request("/identity-bindings", "POST", input);
+  }
+
+  confirmIdentityBinding(proposalEventId: string, input: IdentityBindingConfirmationInput) {
+    return this.request(`/identity-bindings/${encodeURIComponent(proposalEventId)}/confirm`, "POST", input);
+  }
+
+  challengeIdentityBinding(proposalEventId: string, input: IdentityBindingChallengeInput) {
+    return this.request(`/identity-bindings/${encodeURIComponent(proposalEventId)}/challenge`, "POST", input);
+  }
+
+  getAgentIdentity(agentId: string): Promise<AgentIdentityProjection> {
+    return this.request(`/agents/${encodeURIComponent(agentId)}/identity`, "GET");
+  }
+
+  resolveIdentity(identity: string): Promise<{ identity: AgentIdentityProjection; reputation: ReputationProjection; passport_url: string }> {
+    return this.request(`/identities/resolve?identity=${encodeURIComponent(identity)}`, "GET");
+  }
+
   createJob(input: JobCreateInput) {
     return this.request("/jobs", "POST", input);
   }
@@ -334,7 +404,7 @@ export class AgentReputationClient {
   }
 
   getReputation(agentId: string): Promise<Reputation> {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v3`, "GET");
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v4`, "GET");
   }
 
   getAgentEvents(agentId: string, options: { limit?: number } = {}): Promise<{ agent_id: string; events: ReputationEvent[] }> {
@@ -346,7 +416,7 @@ export class AgentReputationClient {
     return this.request(`/events/${encodeURIComponent(eventId)}`, "GET");
   }
 
-  getAgentReputation(agentId: string, projection = "research_trust_v3"): Promise<ReputationProjection> {
+  getAgentReputation(agentId: string, projection = "research_trust_v4"): Promise<ReputationProjection> {
     return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=${encodeURIComponent(projection)}`, "GET");
   }
 

@@ -20,6 +20,8 @@
     "smoke:v2.1": "cd apps/api && python scripts/v2_1_projection_smoke.py",
     "acceptance:v2.1": "cd apps/api && python scripts/v2_1_live_acceptance.py",
     "smoke:v2.2": "cd apps/api && python scripts/v2_2_platform_smoke.py",
-    "acceptance:v2.2": "cd apps/api && python scripts/v2_2_live_acceptance.py"
+    "acceptance:v2.2": "cd apps/api && python scripts/v2_2_live_acceptance.py",
+    "smoke:v2.3": "cd apps/api && python scripts/v2_3_identity_smoke.py",
+    "acceptance:v2.3": "cd apps/api && python scripts/v2_3_live_acceptance.py"
   }
 }

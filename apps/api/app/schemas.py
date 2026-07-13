@@ -76,6 +76,38 @@ class PlatformIdentityVerify(BaseModel):
     evidence_hash: str
 
 
+class AgentIdentityRegister(BaseModel):
+    identity: str
+    nonce: str = Field(min_length=8, max_length=160)
+    signature: str
+    evidence_uri: str = ""
+    evidence_hash: str = ""
+
+
+class IdentityBindingPropose(BaseModel):
+    source_agent_id: str
+    target_agent_id: str
+    source_identity: str
+    target_identity: str
+    nonce: str = Field(min_length=8, max_length=160)
+    source_signature: str
+    evidence_uri: str = ""
+    evidence_hash: str = ""
+
+
+class IdentityBindingConfirm(BaseModel):
+    target_signature: str
+    evidence_uri: str = ""
+    evidence_hash: str = ""
+
+
+class IdentityBindingChallenge(BaseModel):
+    challenger_agent_id: str
+    reason: str
+    evidence_uri: str
+    evidence_hash: str = ""
+
+
 class ReputationOut(BaseModel):
     agent_id: str
     overall: int

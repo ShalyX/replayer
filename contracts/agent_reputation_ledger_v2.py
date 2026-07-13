@@ -17,11 +17,16 @@ class ReputationEventLedger(gl.Contract):
     @gl.public.write
     def append_platform_event(self, event_json: str) -> None:
         event = self._object(event_json)
-        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED", "PLATFORM_IDENTITY_VERIFIED"]
+        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED", "PLATFORM_IDENTITY_VERIFIED", "AGENT_IDENTITY_REGISTERED", "IDENTITY_BINDING_PROPOSED", "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED", "IDENTITY_UNLINKED"]
         if str(event.get("event_type", "")) not in allowed:
             raise gl.vm.UserError("[EXPECTED] Unsupported platform event")
         event["provenance"] = "platform_reported"
-        event["verification_status"] = "uncontested" if event["event_type"] == "REPUTATION_ATTESTED" else "finalized"
+        if event["event_type"] == "REPUTATION_ATTESTED":
+            event["verification_status"] = "uncontested"
+        elif event["event_type"] == "IDENTITY_BINDING_PROPOSED":
+            event["verification_status"] = "pending"
+        else:
+            event["verification_status"] = "finalized"
         self._append(event)
 
     @gl.public.write
@@ -35,6 +40,139 @@ class ReputationEventLedger(gl.Contract):
         event["verification_status"] = "finalized"
         event["references"] = [original_id]
         self._append(event)
+
+    @gl.public.write
+    def confirm_identity_binding(self, confirmation_json: str) -> None:
+        confirmation = self._object(confirmation_json)
+        proposal_id = str(confirmation.get("proposal_event_id", ""))
+        if proposal_id not in self.events:
+            raise gl.vm.UserError("[EXPECTED] Unknown identity binding proposal")
+        proposal = json.loads(self.events[proposal_id])
+        proposal_metadata = proposal.get("metadata", {})
+        confirmation_event_id = str(confirmation["confirmation_event_id"])
+        link_event_id = str(confirmation["link_event_id"])
+        shared_metadata = {
+            "source_agent_id": str(proposal_metadata.get("source_agent_id", proposal.get("agent_id", ""))),
+            "target_agent_id": str(proposal_metadata.get("target_agent_id", proposal.get("counterparty_id", ""))),
+            "source_identity": str(proposal_metadata.get("source_identity", "")),
+            "target_identity": str(proposal_metadata.get("target_identity", "")),
+            "nonce": str(proposal_metadata.get("nonce", "")),
+            "controller_proof": "dual_signature",
+            "target_controller": str(confirmation.get("metadata", {}).get("target_controller", "")),
+            "target_signature_hash": str(confirmation.get("metadata", {}).get("target_signature_hash", "")),
+        }
+        self._append({
+            "event_id": confirmation_event_id,
+            "event_type": "CONTROLLER_CONFIRMED",
+            "agent_id": shared_metadata["target_agent_id"],
+            "platform_id": str(confirmation["platform_id"]),
+            "counterparty_id": shared_metadata["source_agent_id"],
+            "category": "agent_identity",
+            "provenance": "counterparty_confirmed",
+            "verification_status": "finalized",
+            "evidence_uri": str(confirmation.get("evidence_uri", "")),
+            "evidence_hash": str(confirmation.get("evidence_hash", "")),
+            "references": [proposal_id],
+            "metadata": shared_metadata,
+        })
+        self._append({
+            "event_id": link_event_id,
+            "event_type": "IDENTITY_LINKED",
+            "agent_id": shared_metadata["source_agent_id"],
+            "platform_id": str(proposal["platform_id"]),
+            "counterparty_id": shared_metadata["target_agent_id"],
+            "category": "agent_identity",
+            "provenance": "counterparty_confirmed",
+            "verification_status": "finalized",
+            "references": [proposal_id, confirmation_event_id],
+            "metadata": shared_metadata,
+        })
+
+    @gl.public.write
+    def challenge_identity_binding(self, challenge_json: str) -> None:
+        challenge = self._object(challenge_json)
+        proposal_id = str(challenge.get("proposal_event_id", ""))
+        if proposal_id not in self.events:
+            raise gl.vm.UserError("[EXPECTED] Unknown identity binding proposal")
+        proposal = json.loads(self.events[proposal_id])
+        challenge["event_type"] = "IDENTITY_CHALLENGED"
+        challenge["provenance"] = "challenged"
+        challenge["verification_status"] = "pending"
+        challenge["references"] = [proposal_id]
+        self._append(challenge)
+        evaluation_payload = json.dumps({
+            "binding_proposal": proposal,
+            "challenge_reason": challenge.get("metadata", {}).get("reason", ""),
+            "challenge_evidence_uri": challenge.get("evidence_uri", ""),
+            "challenge_evidence_hash": challenge.get("evidence_hash", ""),
+        }, sort_keys=True)
+
+        def evaluate() -> str:
+            raw = gl.nondet.exec_prompt(
+                "Evaluate whether two claimed AI-agent identities are controlled by the same legitimate controller. "
+                "Inspect the supplied identity claims, signature-proof metadata, challenge, and external evidence. "
+                "Return only JSON with outcome (identity_link_valid, identity_link_false, or inconclusive), "
+                "confidence_bps (0-10000), and reasoning_summary. Treat missing or contradictory proof as inconclusive.\n\n"
+                + evaluation_payload,
+                response_format="json",
+            )
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            outcome = str(parsed.get("outcome", "inconclusive")).lower()
+            if outcome not in ["identity_link_valid", "identity_link_false", "inconclusive"]:
+                outcome = "inconclusive"
+            return json.dumps({
+                "outcome": outcome,
+                "confidence_bps": max(0, min(10000, int(parsed.get("confidence_bps", 0)))),
+                "reasoning_summary": str(parsed.get("reasoning_summary", ""))[:1200],
+            }, sort_keys=True)
+
+        judgment = json.loads(gl.eq_principle.prompt_comparative(
+            evaluate,
+            principle=(
+                "The outcome must match exactly. Confidence may differ by at most 1500 basis points. "
+                "Reasoning must identify materially the same controller proof, ownership conflict, or missing evidence."
+            ),
+        ))
+        metadata = proposal.get("metadata", {})
+        judgment["source_agent_id"] = str(metadata.get("source_agent_id", proposal.get("agent_id", "")))
+        judgment["target_agent_id"] = str(metadata.get("target_agent_id", proposal.get("counterparty_id", "")))
+        judgment_event_id = str(challenge["metadata"]["judgment_event_id"])
+        self._append({
+            "event_id": judgment_event_id,
+            "event_type": "IDENTITY_JUDGMENT_FINALIZED",
+            "agent_id": judgment["source_agent_id"],
+            "platform_id": str(proposal["platform_id"]),
+            "counterparty_id": judgment["target_agent_id"],
+            "category": "agent_identity",
+            "provenance": "genlayer_verified",
+            "verification_status": "finalized",
+            "evidence_uri": str(challenge.get("evidence_uri", "")),
+            "evidence_hash": str(challenge.get("evidence_hash", "")),
+            "references": [proposal_id, str(challenge["event_id"])],
+            "metadata": judgment,
+        })
+        resolution_type = "IDENTITY_LINK_FINALIZED" if judgment["outcome"] == "identity_link_valid" else "IDENTITY_LINK_REJECTED"
+        resolution_provenance = "genlayer_verified" if resolution_type == "IDENTITY_LINK_FINALIZED" else "superseded"
+        resolution_status = "finalized" if resolution_type == "IDENTITY_LINK_FINALIZED" else "superseded"
+        self._append({
+            "event_id": str(challenge["metadata"]["resolution_event_id"]),
+            "event_type": resolution_type,
+            "agent_id": judgment["source_agent_id"],
+            "platform_id": str(proposal["platform_id"]),
+            "counterparty_id": judgment["target_agent_id"],
+            "category": "agent_identity",
+            "provenance": resolution_provenance,
+            "verification_status": resolution_status,
+            "evidence_uri": str(challenge.get("evidence_uri", "")),
+            "evidence_hash": str(challenge.get("evidence_hash", "")),
+            "references": [proposal_id, judgment_event_id],
+            "metadata": {
+                "source_agent_id": judgment["source_agent_id"],
+                "target_agent_id": judgment["target_agent_id"],
+                "outcome": judgment["outcome"],
+                "judgment_event_id": judgment_event_id,
+            },
+        })
 
     @gl.public.write
     def challenge_attestation(self, challenge_json: str) -> None:

@@ -15,11 +15,13 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
-from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_platform_credibility, rebuild_projection
-from .models import Agent, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
+from .identity import binding_message, normalize_identity, registration_message, verify_identity_signature
+from .ledger import append_event, event_dict, identity_projection_dict, projection_dict, rebuild_all_identity_projections, rebuild_all_projections, rebuild_identity_projection, rebuild_platform_credibility, rebuild_projection
+from .models import Agent, AgentIdentityProjection, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
 from .schemas import (
-    AgentRegister, AttestationConfirm, AttestationCreate, DeliverableSubmit,
-    DisputeOpen, EventChallenge, JobCreate, PlatformIdentityVerify, PlatformRegister, TrustEvaluateRequest,
+    AgentIdentityRegister, AgentRegister, AttestationConfirm, AttestationCreate, DeliverableSubmit,
+    DisputeOpen, EventChallenge, IdentityBindingChallenge, IdentityBindingConfirm, IdentityBindingPropose,
+    JobCreate, PlatformIdentityVerify, PlatformRegister, TrustEvaluateRequest,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -344,7 +346,7 @@ def platform_agents(platform_id: str, db: Session = Depends(get_db)) -> dict:
     return {
         "platform": platform_to_dict(platform),
         "agents": [
-            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v3"))}
+            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v4"))}
             for agent in agents
         ],
     }
@@ -660,6 +662,237 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
             "event": event_dict(db, judgment_event)}
 
 
+def registered_identity_event(db: Session, agent_id: str, identity: str) -> ReputationEvent | None:
+    normalized = normalize_identity(identity)
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_type == "AGENT_IDENTITY_REGISTERED"
+    )).all()
+    return next((event for event in events if event.agent_id == agent_id and event.event_metadata.get("identity") == normalized), None)
+
+
+@app.post("/agents/{agent_id}/identities")
+def register_agent_identity(agent_id: str, payload: AgentIdentityRegister, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    agent = db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    authorize_platform(auth, agent.platform_id)
+    try:
+        identity = normalize_identity(payload.identity)
+        message = registration_message(agent_id, identity, payload.nonce)
+        verify_identity_signature(identity, message, payload.signature)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    existing_events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_type == "AGENT_IDENTITY_REGISTERED"
+    )).all()
+    owner = next((event for event in existing_events if event.event_metadata.get("identity") == identity), None)
+    if owner and owner.agent_id != agent_id:
+        raise HTTPException(status_code=409, detail="Identity is already registered to another agent")
+    if owner:
+        projection = rebuild_identity_projection(db, agent_id)
+        db.commit()
+        return {"event": event_dict(db, owner), "identity": identity_projection_dict(projection), "idempotent_replay": True}
+    event_id = new_id("rep_evt_agent_identity")
+    metadata = {
+        "identity": identity,
+        "controller": identity,
+        "nonce": payload.nonce,
+        "signature_hash": hashlib.sha256(payload.signature.encode("utf-8")).hexdigest(),
+        "proof_message_hash": hashlib.sha256(message.encode("utf-8")).hexdigest(),
+    }
+    contract_payload = {
+        "event_id": event_id, "event_type": "AGENT_IDENTITY_REGISTERED",
+        "agent_id": agent_id, "platform_id": agent.platform_id, "category": "agent_identity",
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "references": [], "metadata": metadata,
+    }
+    tx = write_contract_json("append_platform_event", contract_payload, event_id)
+    event = append_event(
+        db, event_id=event_id, event_type="AGENT_IDENTITY_REGISTERED", agent_id=agent_id,
+        platform_id=agent.platform_id, category="agent_identity", provenance="platform_reported",
+        verification_status="finalized", evidence_uri=payload.evidence_uri,
+        evidence_hash=payload.evidence_hash, contract_address=genlayer.contract_address,
+        transaction_hash=tx.get("tx_id") or None,
+        metadata={**metadata, "contract_readback_verified": True},
+    )
+    projection = rebuild_identity_projection(db, agent_id)
+    reputation = rebuild_projection(db, agent_id, "research_trust_v4")
+    db.commit()
+    return {"event": event_dict(db, event), "identity": identity_projection_dict(projection),
+            "reputation": projection_dict(reputation), "tx": tx}
+
+
+@app.post("/identity-bindings")
+def propose_identity_binding(payload: IdentityBindingPropose, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    source = db.get(Agent, payload.source_agent_id)
+    target = db.get(Agent, payload.target_agent_id)
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Source or target agent not found")
+    if source.id == target.id:
+        raise HTTPException(status_code=400, detail="Cannot link an agent to itself")
+    authorize_platform(auth, source.platform_id)
+    try:
+        source_identity = normalize_identity(payload.source_identity)
+        target_identity = normalize_identity(payload.target_identity)
+        message = binding_message(source.id, target.id, payload.nonce)
+        verify_identity_signature(source_identity, message, payload.source_signature)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not registered_identity_event(db, source.id, source_identity):
+        raise HTTPException(status_code=400, detail="Source identity is not registered to the source agent")
+    if not registered_identity_event(db, target.id, target_identity):
+        raise HTTPException(status_code=400, detail="Target identity is not registered to the target agent")
+    source_projection = rebuild_identity_projection(db, source.id)
+    if target.id in source_projection.linked_agents:
+        raise HTTPException(status_code=409, detail="Agents are already linked")
+    event_id = new_id("rep_evt_identity_binding")
+    metadata = {
+        "source_agent_id": source.id, "target_agent_id": target.id,
+        "source_identity": source_identity, "target_identity": target_identity,
+        "source_controller": source_identity, "nonce": payload.nonce,
+        "source_signature_hash": hashlib.sha256(payload.source_signature.encode("utf-8")).hexdigest(),
+        "proof_message_hash": hashlib.sha256(message.encode("utf-8")).hexdigest(),
+    }
+    contract_payload = {
+        "event_id": event_id, "event_type": "IDENTITY_BINDING_PROPOSED",
+        "agent_id": source.id, "platform_id": source.platform_id, "counterparty_id": target.id,
+        "category": "agent_identity", "evidence_uri": payload.evidence_uri,
+        "evidence_hash": payload.evidence_hash, "references": [], "metadata": metadata,
+    }
+    tx = write_contract_json("append_platform_event", contract_payload, event_id)
+    event = append_event(
+        db, event_id=event_id, event_type="IDENTITY_BINDING_PROPOSED", agent_id=source.id,
+        platform_id=source.platform_id, counterparty_id=target.id, category="agent_identity",
+        provenance="platform_reported", verification_status="pending",
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        contract_address=genlayer.contract_address, transaction_hash=tx.get("tx_id") or None,
+        metadata={**metadata, "contract_readback_verified": True},
+    )
+    db.commit()
+    return {"proposal": event_dict(db, event), "signing_message": message, "tx": tx}
+
+
+@app.post("/identity-bindings/{proposal_event_id}/confirm")
+def confirm_identity_binding(proposal_event_id: str, payload: IdentityBindingConfirm, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    proposal = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == proposal_event_id,
+        ReputationEvent.event_type == "IDENTITY_BINDING_PROPOSED",
+    )).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Unknown identity binding proposal")
+    metadata = proposal.event_metadata
+    target = db.get(Agent, str(metadata.get("target_agent_id") or ""))
+    source = db.get(Agent, str(metadata.get("source_agent_id") or proposal.agent_id))
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Binding agents no longer exist")
+    authorize_platform(auth, target.platform_id)
+    message = binding_message(source.id, target.id, str(metadata.get("nonce") or ""))
+    try:
+        target_identity = str(metadata.get("target_identity") or "")
+        verify_identity_signature(target_identity, message, payload.target_signature)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    confirmation_id = new_id("rep_evt_controller_confirmed")
+    link_id = new_id("rep_evt_identity_linked")
+    contract_payload = {
+        "proposal_event_id": proposal_event_id, "confirmation_event_id": confirmation_id,
+        "link_event_id": link_id, "platform_id": target.platform_id,
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "metadata": {"target_controller": target_identity,
+                     "target_signature_hash": hashlib.sha256(payload.target_signature.encode("utf-8")).hexdigest()},
+    }
+    tx = write_contract_json("confirm_identity_binding", contract_payload, link_id)
+    indexer.sync_once(db)
+    for created_id in (confirmation_id, link_id):
+        created = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == created_id)).first()
+        if created:
+            created.transaction_hash = tx.get("tx_id") or created.transaction_hash
+            created.contract_address = genlayer.contract_address
+            created.event_metadata = {**created.event_metadata, "contract_readback_verified": True}
+    link = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == link_id)).first()
+    if not link:
+        raise RuntimeError("GenLayer identity link was not indexed")
+    rebuild_all_identity_projections(db)
+    source_identity = rebuild_identity_projection(db, source.id)
+    source_reputation = rebuild_projection(db, source.id, "research_trust_v4")
+    rebuild_projection(db, target.id, "research_trust_v4")
+    db.commit()
+    return {"link": event_dict(db, link), "identity": identity_projection_dict(source_identity),
+            "reputation": projection_dict(source_reputation), "tx": tx}
+
+
+@app.post("/identity-bindings/{proposal_event_id}/challenge")
+def challenge_identity_binding(proposal_event_id: str, payload: IdentityBindingChallenge, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    proposal = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == proposal_event_id,
+        ReputationEvent.event_type == "IDENTITY_BINDING_PROPOSED",
+    )).first()
+    challenger = db.get(Agent, payload.challenger_agent_id)
+    if not proposal or not challenger:
+        raise HTTPException(status_code=404, detail="Binding proposal or challenger not found")
+    authorize_platform(auth, challenger.platform_id)
+    challenge_id = new_id("rep_evt_identity_challenge")
+    judgment_id = new_id("rep_evt_identity_judgment")
+    resolution_id = new_id("rep_evt_identity_resolution")
+    contract_payload = {
+        "event_id": challenge_id, "proposal_event_id": proposal_event_id,
+        "agent_id": proposal.agent_id, "platform_id": proposal.platform_id,
+        "counterparty_id": payload.challenger_agent_id, "category": "agent_identity",
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "metadata": {"reason": payload.reason, "judgment_event_id": judgment_id,
+                     "resolution_event_id": resolution_id},
+    }
+    tx = write_contract_json("challenge_identity_binding", contract_payload, judgment_id)
+    indexer.sync_once(db)
+    for created_id in (challenge_id, judgment_id, resolution_id):
+        created = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == created_id)).first()
+        if created:
+            created.transaction_hash = tx.get("tx_id") or created.transaction_hash
+            created.contract_address = genlayer.contract_address
+            created.event_metadata = {**created.event_metadata, "contract_readback_verified": True}
+    judgment = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == judgment_id)).first()
+    resolution = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == resolution_id)).first()
+    if not judgment or not resolution:
+        raise RuntimeError("GenLayer identity judgment was not indexed")
+    rebuild_all_identity_projections(db)
+    source_identity = rebuild_identity_projection(db, proposal.agent_id)
+    db.commit()
+    return {"judgment": event_dict(db, judgment), "resolution": event_dict(db, resolution),
+            "identity": identity_projection_dict(source_identity), "tx": tx}
+
+
+@app.get("/agents/{agent_id}/identity")
+def get_agent_identity(agent_id: str, db: Session = Depends(get_db)) -> dict:
+    if not db.get(Agent, agent_id):
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    projection = rebuild_identity_projection(db, agent_id)
+    db.commit()
+    return identity_projection_dict(projection)
+
+
+@app.get("/identities/resolve")
+def resolve_identity(identity: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        normalized = normalize_identity(identity)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    rebuild_all_identity_projections(db)
+    projection = db.scalars(select(AgentIdentityProjection).where(
+        AgentIdentityProjection.projection_version == "v1"
+    )).all()
+    matched = next((row for row in projection if normalized in (row.aliases or [])), None)
+    if not matched:
+        raise HTTPException(status_code=404, detail="Unknown identity")
+    reputation = rebuild_projection(db, matched.agent_id, "research_trust_v4")
+    db.commit()
+    return {"identity": identity_projection_dict(matched), "reputation": projection_dict(reputation),
+            "passport_url": f"/agents/{matched.canonical_agent_id}/profile"}
+
+
 @app.post("/attestations")
 def create_attestation(payload: AttestationCreate, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
     acquire_ledger_write_lock(db)
@@ -774,10 +1007,10 @@ def challenge_attestation(event_id: str, payload: EventChallenge, db: Session = 
 
 
 @app.get("/agents/{agent_id}/reputation")
-def get_reputation(agent_id: str, projection: str = "research_trust_v3", db: Session = Depends(get_db)) -> dict:
+def get_reputation(agent_id: str, projection: str = "research_trust_v4", db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3"}:
+    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
     result = rebuild_projection(db, agent_id, projection)
     db.commit()
@@ -788,15 +1021,19 @@ def get_reputation(agent_id: str, projection: str = "research_trust_v3", db: Ses
 def get_history(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    jobs = db.scalars(select(Job).where(Job.provider_agent_id == agent_id).order_by(Job.created_at.desc())).all()
+    identity = rebuild_identity_projection(db, agent_id)
+    member_ids = identity.linked_agents or [agent_id]
+    jobs = db.scalars(select(Job).where(Job.provider_agent_id.in_(member_ids)).order_by(Job.created_at.desc())).all()
     ledger_events = db.scalars(select(ReputationEvent).where(
-        ReputationEvent.agent_id == agent_id
+        ReputationEvent.agent_id.in_(member_ids)
     ).order_by(ReputationEvent.occurred_at.desc())).all()
     return {
-        "agent_id": agent_id,
+        "agent_id": identity.canonical_agent_id,
+        "requested_agent_id": agent_id,
+        "identity": identity_projection_dict(identity),
         "jobs": [job_to_dict(job) for job in jobs],
-        "disputes": [dispute_to_dict(d) for d in db.scalars(select(Dispute).join(Job).where(Job.provider_agent_id == agent_id)).all()],
-        "judgments": [judgment_to_dict(j) for j in db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == agent_id)).all()],
+        "disputes": [dispute_to_dict(d) for d in db.scalars(select(Dispute).join(Job).where(Job.provider_agent_id.in_(member_ids))).all()],
+        "judgments": [judgment_to_dict(j) for j in db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id.in_(member_ids))).all()],
         "reputation_snapshots": [],
         "events": [event_dict(db, event) for event in ledger_events],
         "timeline": [ledger_timeline_event(db, event) for event in ledger_events],
@@ -809,19 +1046,24 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
     history = get_history(agent_id, db)
-    projection = rebuild_projection(db, agent_id, "research_trust_v3")
+    identity = rebuild_identity_projection(db, agent_id)
+    canonical_agent = db.get(Agent, identity.canonical_agent_id) or agent
+    projection = rebuild_projection(db, agent_id, "research_trust_v4")
     db.commit()
-    return {"agent": agent_to_dict(agent), "reputation": projection_dict(projection), **history}
+    return {"agent": agent_to_dict(canonical_agent), "requested_alias": agent_to_dict(agent),
+            "identity": identity_projection_dict(identity), "reputation": projection_dict(projection), **history}
 
 
 @app.get("/agents/{agent_id}/events")
 def get_agent_events(agent_id: str, limit: int = 100, db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
+    identity = rebuild_identity_projection(db, agent_id)
     events = db.scalars(select(ReputationEvent).where(
-        ReputationEvent.agent_id == agent_id
+        ReputationEvent.agent_id.in_(identity.linked_agents or [agent_id])
     ).order_by(ReputationEvent.occurred_at.desc()).limit(min(limit, 500))).all()
-    return {"agent_id": agent_id, "events": [event_dict(db, event) for event in events]}
+    return {"agent_id": identity.canonical_agent_id, "requested_agent_id": agent_id,
+            "identity": identity_projection_dict(identity), "events": [event_dict(db, event) for event in events]}
 
 
 @app.get("/events/{event_id}")
@@ -854,7 +1096,10 @@ def sync_indexer(db: Session = Depends(get_db)) -> dict:
 def rebuild_projections(db: Session = Depends(get_db)) -> dict:
     projections = rebuild_all_projections(db)
     db.commit()
-    return {"rebuilt": len(projections), "projections": ["research_trust_v1", "research_trust_v2", "research_trust_v3", "platform_credibility_v1"]}
+    identity_count = db.scalar(select(func.count()).select_from(AgentIdentityProjection)) or 0
+    return {"rebuilt": len(projections) + identity_count,
+            "projections": ["research_trust_v1", "research_trust_v2", "research_trust_v3",
+                            "research_trust_v4", "platform_credibility_v1", "agent_identity_v1"]}
 
 
 @app.post("/trust/evaluate", dependencies=[Depends(require_key)])
@@ -863,7 +1108,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v3")
+    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v4")
     judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
     fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
     fraud_incidents = reputation.fraud_incidents

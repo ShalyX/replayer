@@ -21,7 +21,7 @@ services:
       - key: ALLOW_TEST_MOCKS
         value: "false"
       - key: GENLAYER_CONTRACT_ADDRESS
-        value: 0xE66B9A95F0439A416274A2a21df46e76b57d176A
+        value: 0x2E7017a0Ae4567b3398EC5C836913dce745F727e
       - key: GENLAYER_ACCOUNT_PASSWORD
         generateValue: true
       - key: GENLAYER_ACCOUNT_NAME
@@ -40,6 +40,8 @@ services:
         value: rep_evt_final_3ed80733353e5dfae9617a9d
       - key: GENLAYER_PROOF_TRANSACTION_HASH
         value: 0x313e028aa5fa9ab1227ca321fa9c9c33a4c3a1ecea4aee9a219ff404f4ec07a6
+      - key: GENLAYER_PROOF_TRANSACTIONS_JSON
+        value: '{"rep_evt_v23_probe_judgment_1783936853":"0x369f8d03207ba45626e40dd6b273c2cfad301ebfbd800d0bbd0278ba9e42a34e"}'
 
 databases:
   - name: replayer-postgres

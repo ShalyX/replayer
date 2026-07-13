@@ -8,6 +8,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .models import (
+    Agent,
+    AgentIdentityProjection,
     AgentReputationProjection,
     ProjectionVersion,
     PlatformCredibilityProjection,
@@ -26,6 +28,10 @@ EVENT_TYPES = {
     "FRAUD_CONFIRMED", "AGENT_CLEARED", "EVENT_ATTESTED", "EVENT_CHALLENGED",
     "EVENT_SUPERSEDED", "POLICY_EVALUATED", "REPUTATION_ATTESTED",
     "COUNTERPARTY_CONFIRMED", "ATTESTATION_JUDGMENT_FINALIZED", "PLATFORM_IDENTITY_VERIFIED",
+    "AGENT_IDENTITY_REGISTERED", "IDENTITY_BINDING_PROPOSED", "CONTROLLER_CONFIRMED",
+    "IDENTITY_LINKED", "IDENTITY_CHALLENGED", "IDENTITY_JUDGMENT_FINALIZED",
+    "IDENTITY_LINK_FINALIZED", "IDENTITY_LINK_REJECTED", "IDENTITY_UNLINKED",
+    "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED",
 }
 PROVENANCE = {
     "platform_reported", "counterparty_confirmed", "genlayer_provisional",
@@ -121,6 +127,8 @@ def event_dict(db: Session, event: ReputationEvent) -> dict:
 
 
 def rebuild_projection(db: Session, agent_id: str, projection: str = "research_trust_v1") -> AgentReputationProjection:
+    if projection == "research_trust_v4":
+        return rebuild_projection_v4(db, agent_id)
     if projection == "research_trust_v3":
         return rebuild_projection_v3(db, agent_id)
     if projection == "research_trust_v2":
@@ -226,6 +234,12 @@ def rebuild_all_projections(db: Session) -> list[AgentReputationProjection]:
     ))
     projections.extend(rebuild_projection_v3(db, agent_id) for agent_id in agent_ids)
     rebuild_all_platform_credibility(db)
+    rebuild_all_identity_projections(db)
+    db.execute(delete(AgentReputationProjection).where(
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v4",
+    ))
+    projections.extend(rebuild_projection_v4(db, agent_id) for agent_id in agent_ids)
     return projections
 
 
@@ -492,6 +506,201 @@ def ensure_projection_version_v3(db: Session) -> None:
             "platform_credibility_projection": "platform_credibility_v1",
             "weighting": "snapshot", "reported_cap_range": [1, 8],
             "confirmed_cap_range": [1, 6], "genlayer_verified_cap": 10,
+        }))
+
+
+def rebuild_all_identity_projections(db: Session) -> list[AgentIdentityProjection]:
+    agent_ids = sorted(db.scalars(select(Agent.id)).all())
+    parent = {agent_id: agent_id for agent_id in agent_ids}
+
+    def find(agent_id: str) -> str:
+        while parent[agent_id] != agent_id:
+            parent[agent_id] = parent[parent[agent_id]]
+            agent_id = parent[agent_id]
+        return agent_id
+
+    def union(left: str, right: str) -> None:
+        if left not in parent or right not in parent:
+            return
+        left_root, right_root = find(left), find(right)
+        if left_root == right_root:
+            return
+        canonical = min(left_root, right_root)
+        parent[left_root] = canonical
+        parent[right_root] = canonical
+
+    events = db.scalars(select(ReputationEvent).order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)).all()
+    registration_rank: dict[str, int] = {}
+    for index, event in enumerate(events):
+        if event.event_type == "AGENT_IDENTITY_REGISTERED" and event.agent_id not in registration_rank:
+            registration_rank[event.agent_id] = index
+    references = db.scalars(select(ReputationEventReference)).all()
+    refs_by_event: dict[str, list[str]] = {}
+    for reference in references:
+        refs_by_event.setdefault(reference.event_id, []).append(reference.referenced_event_id)
+    rejected_targets = {
+        referenced
+        for event in events
+        if event.event_type in {"IDENTITY_LINK_REJECTED", "IDENTITY_UNLINKED", "EVENT_SUPERSEDED"}
+        for referenced in refs_by_event.get(event.event_id, [])
+    }
+    inactive_links = set(rejected_targets)
+    inactive_links.update(
+        event.event_id for event in events
+        if event.event_type in {"IDENTITY_LINKED", "IDENTITY_LINK_FINALIZED"}
+        and any(reference in rejected_targets for reference in refs_by_event.get(event.event_id, []))
+    )
+    for event in events:
+        if event.event_type not in {"IDENTITY_LINKED", "IDENTITY_LINK_FINALIZED"} or event.event_id in inactive_links:
+            continue
+        source = str(event.event_metadata.get("source_agent_id") or event.agent_id)
+        target = str(event.event_metadata.get("target_agent_id") or event.counterparty_id or "")
+        union(source, target)
+
+    members_by_root: dict[str, list[str]] = {}
+    for agent_id in agent_ids:
+        members_by_root.setdefault(find(agent_id), []).append(agent_id)
+    db.execute(delete(AgentIdentityProjection).where(AgentIdentityProjection.projection_version == "v1"))
+    rows: list[AgentIdentityProjection] = []
+    for members in members_by_root.values():
+        canonical = min(members, key=lambda member: (registration_rank.get(member, len(events)), member))
+        component_events = [
+            event for event in events
+            if event.agent_id in members or str(event.event_metadata.get("target_agent_id") or "") in members
+        ]
+        registrations = [event for event in component_events if event.event_type == "AGENT_IDENTITY_REGISTERED"]
+        aliases = sorted(set(members) | {
+            str(event.event_metadata.get("identity")) for event in registrations if event.event_metadata.get("identity")
+        })
+        controllers = sorted({
+            str(event.event_metadata.get("controller")) for event in registrations if event.event_metadata.get("controller")
+        })
+        rejected = [event.event_id for event in component_events if event.event_type == "IDENTITY_LINK_REJECTED"]
+        challenged = [event.event_id for event in component_events if event.event_type == "IDENTITY_CHALLENGED"]
+        status = "linked" if len(members) > 1 else "verified" if registrations else "unlinked"
+        for agent_id in members:
+            row = AgentIdentityProjection(
+                agent_id=agent_id,
+                canonical_agent_id=canonical,
+                projection_version="v1",
+                status=status,
+                linked_agents=sorted(members),
+                aliases=aliases,
+                controllers=controllers,
+                last_event_id=component_events[-1].event_id if component_events else None,
+                calculated_at=datetime.utcnow(),
+                details={
+                    "projection": "agent_identity_v1",
+                    "challenge_count": len(challenged),
+                    "rejected_binding_count": len(rejected),
+                    "rejected_binding_events": rejected,
+                },
+            )
+            db.add(row)
+            rows.append(row)
+    ensure_identity_projection_version(db)
+    db.flush()
+    return rows
+
+
+def rebuild_identity_projection(db: Session, agent_id: str) -> AgentIdentityProjection:
+    if not db.get(Agent, agent_id):
+        raise ValueError(f"Unknown agent: {agent_id}")
+    rebuild_all_identity_projections(db)
+    return db.scalars(select(AgentIdentityProjection).where(
+        AgentIdentityProjection.agent_id == agent_id,
+        AgentIdentityProjection.projection_version == "v1",
+    )).one()
+
+
+def ensure_identity_projection_version(db: Session) -> None:
+    existing = db.scalars(select(ProjectionVersion).where(
+        ProjectionVersion.projection_name == "agent_identity", ProjectionVersion.version == "v1"
+    )).first()
+    if not existing:
+        db.add(ProjectionVersion(projection_name="agent_identity", version="v1", configuration={
+            "canonical_selection": "earliest_identity_registration_then_agent_id",
+            "active_links": ["IDENTITY_LINKED", "IDENTITY_LINK_FINALIZED"],
+            "inactive_links": ["IDENTITY_LINK_REJECTED", "IDENTITY_UNLINKED", "EVENT_SUPERSEDED"],
+            "controller_proof": "signed canonical message",
+        }))
+
+
+def identity_projection_dict(projection: AgentIdentityProjection) -> dict:
+    return {
+        "agent_id": projection.agent_id,
+        "canonical_agent_id": projection.canonical_agent_id,
+        "projection": "agent_identity_v1",
+        "projection_version": projection.projection_version,
+        "status": projection.status,
+        "linked_agents": projection.linked_agents,
+        "aliases": projection.aliases,
+        "controllers": projection.controllers,
+        "last_event_id": projection.last_event_id,
+        "calculated_at": projection.calculated_at.isoformat(),
+        "details": projection.details,
+    }
+
+
+def rebuild_projection_v4(db: Session, agent_id: str) -> AgentReputationProjection:
+    identity = rebuild_identity_projection(db, agent_id)
+    members = sorted(identity.linked_agents or [agent_id])
+    member_rows = [rebuild_projection_v3(db, member_id) for member_id in members]
+    trust = max(0, min(100, 70 + sum(row.trust_score - 70 for row in member_rows)))
+    risk = max(0, min(100, 10 + sum(row.risk_score - 10 for row in member_rows)))
+    fraud = sum(row.fraud_incidents for row in member_rows)
+    status = "flagged" if fraud or risk >= 60 else "review" if risk >= 35 else "active"
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.agent_id.in_(members)
+    ).order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)).all()
+    work_history = [
+        item for row in member_rows for item in (row.details or {}).get("verified_work_history", [])
+    ]
+    row = db.scalars(select(AgentReputationProjection).where(
+        AgentReputationProjection.agent_id == agent_id,
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v4",
+    )).first()
+    if not row:
+        row = AgentReputationProjection(agent_id=agent_id, projection_name="research_trust", projection_version="v4")
+        db.add(row)
+    row.trust_score = trust
+    row.risk_score = risk
+    row.status = status
+    row.completed_jobs = sum(member.completed_jobs for member in member_rows)
+    row.successful_jobs = sum(member.successful_jobs for member in member_rows)
+    row.disputes = sum(member.disputes for member in member_rows)
+    row.fraud_incidents = fraud
+    row.last_event_id = events[-1].event_id if events else None
+    row.calculated_at = datetime.utcnow()
+    identity_details = identity_projection_dict(identity)
+    identity_details.pop("calculated_at", None)
+    row.details = {
+        "verified_platforms": sorted({
+            platform for member in member_rows for platform in (member.details or {}).get("verified_platforms", [])
+        }),
+        "verified_work_history": work_history,
+        "identity_projection": identity_details,
+        "canonical_agent_id": identity.canonical_agent_id,
+        "linked_agent_ids": members,
+        "member_projection": "research_trust_v3",
+    }
+    ensure_projection_version_v4(db)
+    db.flush()
+    return row
+
+
+def ensure_projection_version_v4(db: Session) -> None:
+    existing = db.scalars(select(ProjectionVersion).where(
+        ProjectionVersion.projection_name == "research_trust", ProjectionVersion.version == "v4"
+    )).first()
+    if not existing:
+        db.add(ProjectionVersion(projection_name="research_trust", version="v4", configuration={
+            "identity_projection": "agent_identity_v1",
+            "member_projection": "research_trust_v3",
+            "trust": "70 + sum(member_trust - 70)",
+            "risk": "10 + sum(member_risk - 10)",
+            "bounds": [0, 100],
         }))
 
 

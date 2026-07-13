@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 
 from app.database import Base, SessionLocal, engine
 from app.ledger import projection_dict, rebuild_all_projections
-from app.models import AgentReputationProjection, PlatformCredibilityProjection
+from app.models import AgentIdentityProjection, AgentReputationProjection, PlatformCredibilityProjection
 
 
 def normalized(db):
@@ -21,6 +21,7 @@ def normalized(db):
     platforms = db.scalars(select(PlatformCredibilityProjection).order_by(
         PlatformCredibilityProjection.platform_id, PlatformCredibilityProjection.projection_version
     )).all()
+    identities = db.scalars(select(AgentIdentityProjection).order_by(AgentIdentityProjection.agent_id)).all()
     return {
         "agents": agents,
         "platforms": [{
@@ -30,6 +31,12 @@ def normalized(db):
             "challenges": row.challenges, "overturns": row.overturns,
             "verified_identity": row.verified_identity, "details": row.details,
         } for row in platforms],
+        "identities": [{
+            "agent_id": row.agent_id, "canonical_agent_id": row.canonical_agent_id,
+            "version": row.projection_version, "status": row.status,
+            "linked_agents": row.linked_agents, "aliases": row.aliases,
+            "controllers": row.controllers, "details": row.details,
+        } for row in identities],
     }
 
 
@@ -40,10 +47,11 @@ with SessionLocal() as db:
     before = normalized(db)
     db.execute(delete(AgentReputationProjection))
     db.execute(delete(PlatformCredibilityProjection))
+    db.execute(delete(AgentIdentityProjection))
     db.commit()
     rebuild_all_projections(db)
     db.commit()
     after = normalized(db)
     if before != after:
         raise SystemExit("Projection replay mismatch\n" + json.dumps({"before": before, "after": after}, indent=2))
-    print(f"Ledger rebuild deterministic for {len(after['agents'])} agent and {len(after['platforms'])} platform projections")
+    print(f"Ledger rebuild deterministic for {len(after['agents'])} agent, {len(after['platforms'])} platform, and {len(after['identities'])} identity projections")

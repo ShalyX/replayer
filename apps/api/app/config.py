@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     genlayer_start_block: int = 0
     genlayer_proof_event_id: str = ""
     genlayer_proof_transaction_hash: str = ""
+    genlayer_proof_transactions_json: str = "{}"
 
     model_config = SettingsConfigDict(env_file="../../.env", env_file_encoding="utf-8", extra="ignore")
 

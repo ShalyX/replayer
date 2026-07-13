@@ -61,7 +61,7 @@ const defaultEvents = [
 ];
 
 const LAST_DEMO_AGENT_KEY = "agent-reputation-registry:last-demo-agent";
-const CONTRACT_ADDRESS = "0xE66B9A95F0439A416274A2a21df46e76b57d176A";
+const CONTRACT_ADDRESS = "0x2E7017a0Ae4567b3398EC5C836913dce745F727e";
 
 export default function Dashboard() {
   const [demo, setDemo] = useState<DemoSeed | null>(null);

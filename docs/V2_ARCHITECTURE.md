@@ -17,3 +17,5 @@ GenLayer contract -> indexer checkpoint -> `reputation_events` -> projection rep
 Platform lifecycle events may be platform-reported. Dispute verdicts require GenLayer. A database can be rebuilt by resetting the indexer checkpoint, re-indexing contract events, and replaying every active projection version.
 
 No contract method stores or mutates an official trust score. Corrections append challenge, clearance, or supersession events referencing earlier events.
+
+V2.3 also treats canonical agent identity as a projection. Deterministic controller signatures authorize uncontested links; GenLayer adjudicates challenged links. `agent_identity_v1` rebuilds the alias graph, and `research_trust_v4` derives one Passport across every active linked identity. Deleting either projection does not delete identity authority or history.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime
@@ -40,6 +41,13 @@ class GenLayerEventIndexer:
 
     @staticmethod
     def _proof_transaction(event_id: str) -> str | None:
+        try:
+            proof_transactions = json.loads(settings.genlayer_proof_transactions_json or "{}")
+        except json.JSONDecodeError:
+            proof_transactions = {}
+        mapped = str(proof_transactions.get(event_id) or "")
+        if re.fullmatch(r"0x[a-fA-F0-9]{64}", mapped):
+            return mapped
         transaction_hash = settings.genlayer_proof_transaction_hash
         if (
             event_id == settings.genlayer_proof_event_id
@@ -145,25 +153,30 @@ class GenLayerEventIndexer:
         db.flush()
 
     def _restore_release_provenance(self, db: Session) -> None:
-        event_id = settings.genlayer_proof_event_id
-        transaction_hash = self._proof_transaction(event_id)
-        if not event_id or not transaction_hash:
-            return
-        event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
-        if not event:
-            return
-        if not event.transaction_hash:
-            contract_event = self.client.call_json("get_event", [event_id])
-            if not isinstance(contract_event, dict) or str(contract_event.get("event_id")) != event_id:
-                raise RuntimeError(f"Release proof event {event_id} was not readable from contract state")
-            event.transaction_hash = transaction_hash
-            event.contract_address = self.client.contract_address
-            event.event_metadata = {**event.event_metadata, "contract_readback_verified": True}
-        if event.job_id:
-            judgment = db.scalars(select(Judgment).where(Judgment.job_id == event.job_id)).first()
-            if judgment:
-                judgment.tx_hash = transaction_hash
-                judgment.verify_url = self.client.verify_url(transaction_hash)
+        try:
+            proof_transactions = json.loads(settings.genlayer_proof_transactions_json or "{}")
+        except json.JSONDecodeError:
+            proof_transactions = {}
+        if settings.genlayer_proof_event_id and settings.genlayer_proof_transaction_hash:
+            proof_transactions[settings.genlayer_proof_event_id] = settings.genlayer_proof_transaction_hash
+        for event_id, transaction_hash in proof_transactions.items():
+            if not re.fullmatch(r"0x[a-fA-F0-9]{64}", str(transaction_hash)):
+                continue
+            event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
+            if not event:
+                continue
+            if not event.transaction_hash:
+                contract_event = self.client.call_json("get_event", [event_id])
+                if not isinstance(contract_event, dict) or str(contract_event.get("event_id")) != event_id:
+                    raise RuntimeError(f"Release proof event {event_id} was not readable from contract state")
+                event.transaction_hash = transaction_hash
+                event.contract_address = self.client.contract_address
+                event.event_metadata = {**event.event_metadata, "contract_readback_verified": True}
+            if event.job_id:
+                judgment = db.scalars(select(Judgment).where(Judgment.job_id == event.job_id)).first()
+                if judgment:
+                    judgment.tx_hash = transaction_hash
+                    judgment.verify_url = self.client.verify_url(transaction_hash)
 
     def sync_once(self, db: Session) -> dict:
         if not self.client.enabled():
