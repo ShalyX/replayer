@@ -238,10 +238,11 @@ def rebuild_platform_credibility(db: Session, platform_id: str) -> PlatformCredi
         refs_by_event.setdefault(reference.event_id, []).append(reference.referenced_event_id)
     issued = [event for event in events if event.platform_id == platform_id and event.event_type == "REPUTATION_ATTESTED" and event.provenance == "platform_reported"]
     issued_ids = {event.event_id for event in issued}
-    confirmations = sum(
-        1 for event in events if event.event_type == "COUNTERPARTY_CONFIRMED"
+    confirmation_events = [
+        event for event in events if event.event_type == "COUNTERPARTY_CONFIRMED"
         and any(reference in issued_ids for reference in refs_by_event.get(event.event_id, []))
-    )
+    ]
+    confirmations = len(confirmation_events)
     judgments = [
         event for event in events if event.event_type == "ATTESTATION_JUDGMENT_FINALIZED"
         and any(reference in issued_ids for reference in refs_by_event.get(event.event_id, []))
@@ -278,7 +279,8 @@ def rebuild_platform_credibility(db: Session, platform_id: str) -> PlatformCredi
     row.challenges = challenges
     row.overturns = overturns
     row.verified_identity = verified_identity
-    row.last_event_id = events[-1].event_id if events else None
+    relevant_events = issued + confirmation_events + judgments + verified_identity_events
+    row.last_event_id = relevant_events[-1].event_id if relevant_events else None
     row.calculated_at = datetime.utcnow()
     row.details = {
         "valid_judgments": valid, "partial_overturns": partial, "false_attestations": false,
