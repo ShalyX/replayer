@@ -27,7 +27,7 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
   const profile = await api<Profile>(`/agents/${id}/profile`);
   const workHistory = (profile.reputation.details?.verified_work_history || []) as Array<{
     event_id: string; type: string; value: number; platform_id: string;
-    provenance: string; verification_status: string; contribution: number;
+    provenance: string; verification_status: string; contribution: number; issuer_credibility_bps?: number;
   }>;
 
   return (
@@ -59,17 +59,18 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
         <section className="panel">
           <h2>Verified Work History</h2>
           <table className="table">
-            <thead><tr><th>Claim</th><th>Platform</th><th>Provenance</th><th>Trust</th></tr></thead>
+            <thead><tr><th>Claim</th><th>Platform</th><th>Issuer credibility</th><th>Provenance</th><th>Trust</th></tr></thead>
             <tbody>
               {workHistory.map((item) => (
                 <tr key={item.event_id}>
                   <td>{item.value} {item.type.replaceAll("_", " ")}</td>
                   <td>{item.platform_id}</td>
+                  <td>{Math.round((item.issuer_credibility_bps || 5000) / 100)}</td>
                   <td><span className={item.provenance === "superseded" ? "pill bad" : "pill"}>{item.provenance.replaceAll("_", " ")}</span></td>
                   <td>{item.contribution > 0 ? `+${item.contribution}` : "0"}</td>
                 </tr>
               ))}
-              {workHistory.length === 0 ? <tr><td colSpan={4}>No work-history attestations yet.</td></tr> : null}
+              {workHistory.length === 0 ? <tr><td colSpan={5}>No work-history attestations yet.</td></tr> : null}
             </tbody>
           </table>
         </section>

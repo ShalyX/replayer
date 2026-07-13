@@ -17,7 +17,7 @@ class ReputationEventLedger(gl.Contract):
     @gl.public.write
     def append_platform_event(self, event_json: str) -> None:
         event = self._object(event_json)
-        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED"]
+        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED", "PLATFORM_IDENTITY_VERIFIED"]
         if str(event.get("event_type", "")) not in allowed:
             raise gl.vm.UserError("[EXPECTED] Unsupported platform event")
         event["provenance"] = "platform_reported"

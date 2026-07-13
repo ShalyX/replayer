@@ -169,6 +169,21 @@ export type PlatformApiKeyResult = {
   api_key_warning: string;
 };
 
+export type PlatformCredibility = {
+  platform_id: string;
+  projection: "platform_credibility_v1";
+  credibility_score: number;
+  credibility_bps: number;
+  status: "trusted" | "established" | "developing" | "restricted";
+  attestations_issued: number;
+  confirmations_received: number;
+  challenges: number;
+  overturns: number;
+  verified_identity: boolean;
+  calculated_at: string;
+  details: Record<string, unknown>;
+};
+
 export type AgentRegisterInput = {
   agent_id?: string;
   platform_id: string;
@@ -270,6 +285,14 @@ export class AgentReputationClient {
     return this.request(`/platforms/${encodeURIComponent(platformId)}/api-key`, "POST", {});
   }
 
+  getPlatformCredibility(platformId: string): Promise<PlatformCredibility> {
+    return this.request(`/platforms/${encodeURIComponent(platformId)}/credibility`, "GET");
+  }
+
+  verifyPlatformIdentity(platformId: string, input: { agent_id: string; evidence_uri: string; evidence_hash: string }) {
+    return this.request(`/platforms/${encodeURIComponent(platformId)}/verify-identity`, "POST", input);
+  }
+
   checkAuth(): Promise<{ ok: boolean; type: "admin" | "platform"; platform_id: string | null }> {
     return this.request("/auth/check", "GET");
   }
@@ -311,7 +334,7 @@ export class AgentReputationClient {
   }
 
   getReputation(agentId: string): Promise<Reputation> {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v1`, "GET");
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v3`, "GET");
   }
 
   getAgentEvents(agentId: string, options: { limit?: number } = {}): Promise<{ agent_id: string; events: ReputationEvent[] }> {
@@ -323,7 +346,7 @@ export class AgentReputationClient {
     return this.request(`/events/${encodeURIComponent(eventId)}`, "GET");
   }
 
-  getAgentReputation(agentId: string, projection = "research_trust_v2"): Promise<ReputationProjection> {
+  getAgentReputation(agentId: string, projection = "research_trust_v3"): Promise<ReputationProjection> {
     return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=${encodeURIComponent(projection)}`, "GET");
   }
 

@@ -70,6 +70,12 @@ class EventChallenge(BaseModel):
     evidence_hash: str = ""
 
 
+class PlatformIdentityVerify(BaseModel):
+    agent_id: str
+    evidence_uri: str
+    evidence_hash: str
+
+
 class ReputationOut(BaseModel):
     agent_id: str
     overall: int

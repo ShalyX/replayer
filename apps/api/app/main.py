@@ -15,11 +15,11 @@ from .config import settings
 from .database import Base, SessionLocal, engine, get_db
 from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
-from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_projection
-from .models import Agent, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, ReputationEvent, new_id
+from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_platform_credibility, rebuild_projection
+from .models import Agent, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
 from .schemas import (
     AgentRegister, AttestationConfirm, AttestationCreate, DeliverableSubmit,
-    DisputeOpen, EventChallenge, JobCreate, PlatformRegister, TrustEvaluateRequest,
+    DisputeOpen, EventChallenge, JobCreate, PlatformIdentityVerify, PlatformRegister, TrustEvaluateRequest,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -344,10 +344,47 @@ def platform_agents(platform_id: str, db: Session = Depends(get_db)) -> dict:
     return {
         "platform": platform_to_dict(platform),
         "agents": [
-            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v2"))}
+            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v3"))}
             for agent in agents
         ],
     }
+
+
+@app.get("/platforms/{platform_id}/credibility")
+def platform_credibility(platform_id: str, db: Session = Depends(get_db)) -> dict:
+    if not db.get(Platform, platform_id):
+        raise HTTPException(status_code=404, detail="Unknown platform")
+    projection = rebuild_platform_credibility(db, platform_id)
+    db.commit()
+    return platform_credibility_dict(projection)
+
+
+@app.post("/platforms/{platform_id}/verify-identity", dependencies=[Depends(require_admin_key)])
+def verify_platform_identity(platform_id: str, payload: PlatformIdentityVerify, db: Session = Depends(get_db)) -> dict:
+    acquire_ledger_write_lock(db)
+    platform = db.get(Platform, platform_id)
+    agent = db.get(Agent, payload.agent_id)
+    if not platform or not agent or agent.platform_id != platform_id:
+        raise HTTPException(status_code=404, detail="Platform agent not found")
+    event_id = new_id("rep_evt_platform_identity")
+    metadata = {"identity_type": "marketplace", "platform_name": platform.name}
+    contract_payload = {
+        "event_id": event_id, "event_type": "PLATFORM_IDENTITY_VERIFIED",
+        "agent_id": agent.id, "platform_id": platform_id, "category": "platform_identity",
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "references": [], "metadata": metadata,
+    }
+    tx = write_contract_json("append_platform_event", contract_payload, event_id)
+    event = append_event(
+        db, event_id=event_id, event_type="PLATFORM_IDENTITY_VERIFIED", agent_id=agent.id,
+        platform_id=platform_id, category="platform_identity", provenance="platform_reported",
+        verification_status="finalized", evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        contract_address=genlayer.contract_address, transaction_hash=tx.get("tx_id") or None,
+        metadata={**metadata, "contract_readback_verified": True},
+    )
+    projection = rebuild_platform_credibility(db, platform_id)
+    db.commit()
+    return {"event": event_dict(db, event), "credibility": platform_credibility_dict(projection), "tx": tx}
 
 
 @app.post("/platforms/register", dependencies=[Depends(require_admin_key)])
@@ -637,9 +674,12 @@ def create_attestation(payload: AttestationCreate, db: Session = Depends(get_db)
     if not db.get(Platform, payload.platform_id):
         raise HTTPException(status_code=404, detail="Unknown platform")
     event_id = new_id("rep_evt_attestation")
+    credibility = rebuild_platform_credibility(db, payload.platform_id)
     metadata = {
         "type": payload.type, "value": payload.value,
         "period_start": payload.period_start, "period_end": payload.period_end,
+        "issuer_credibility_bps": credibility.credibility_score * 100,
+        "credibility_projection_version": "platform_credibility_v1",
     }
     contract_payload = {
         "event_id": event_id, "event_type": "REPUTATION_ATTESTED",
@@ -655,7 +695,7 @@ def create_attestation(payload: AttestationCreate, db: Session = Depends(get_db)
         evidence_hash=payload.evidence_hash, contract_address=genlayer.contract_address,
         transaction_hash=tx.get("tx_id") or None, metadata={**metadata, "contract_readback_verified": True},
     )
-    projection = rebuild_projection(db, payload.agent_id, "research_trust_v2")
+    projection = rebuild_projection(db, payload.agent_id, "research_trust_v3")
     db.commit()
     return {"event": event_dict(db, event), "reputation": projection_dict(projection), "tx": tx}
 
@@ -670,9 +710,12 @@ def confirm_attestation(event_id: str, payload: AttestationConfirm, db: Session 
     if payload.value > int(original.event_metadata.get("value") or 0):
         raise HTTPException(status_code=400, detail="Confirmation cannot exceed the reported value")
     confirmation_id = new_id("rep_evt_confirmation")
+    credibility = rebuild_platform_credibility(db, payload.platform_id)
     metadata = {
         "type": original.event_metadata.get("type"), "value": payload.value,
         "attestation_event_id": event_id,
+        "issuer_credibility_bps": credibility.credibility_score * 100,
+        "credibility_projection_version": "platform_credibility_v1",
     }
     contract_payload = {
         "event_id": confirmation_id, "agent_id": original.agent_id, "platform_id": payload.platform_id,
@@ -689,7 +732,7 @@ def confirm_attestation(event_id: str, payload: AttestationConfirm, db: Session 
         contract_address=genlayer.contract_address, transaction_hash=tx.get("tx_id") or None,
         metadata={**metadata, "contract_readback_verified": True},
     )
-    projection = rebuild_projection(db, original.agent_id, "research_trust_v2")
+    projection = rebuild_projection(db, original.agent_id, "research_trust_v3")
     db.commit()
     return {"event": event_dict(db, event), "reputation": projection_dict(projection), "tx": tx}
 
@@ -723,16 +766,18 @@ def challenge_attestation(event_id: str, payload: EventChallenge, db: Session = 
             created_event.transaction_hash = tx.get("tx_id") or created_event.transaction_hash
             created_event.contract_address = genlayer.contract_address
             created_event.event_metadata = {**created_event.event_metadata, "contract_readback_verified": True}
-    projection = rebuild_projection(db, original.agent_id, "research_trust_v2")
+    projection = rebuild_projection(db, original.agent_id, "research_trust_v3")
+    issuer_credibility = rebuild_platform_credibility(db, original.platform_id)
     db.commit()
-    return {"judgment": event_dict(db, judgment), "reputation": projection_dict(projection), "tx": tx}
+    return {"judgment": event_dict(db, judgment), "reputation": projection_dict(projection),
+            "issuer_credibility": platform_credibility_dict(issuer_credibility), "tx": tx}
 
 
 @app.get("/agents/{agent_id}/reputation")
-def get_reputation(agent_id: str, projection: str = "research_trust_v1", db: Session = Depends(get_db)) -> dict:
+def get_reputation(agent_id: str, projection: str = "research_trust_v3", db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    if projection not in {"research_trust_v1", "research_trust_v2"}:
+    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
     result = rebuild_projection(db, agent_id, projection)
     db.commit()
@@ -764,7 +809,7 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
     history = get_history(agent_id, db)
-    projection = rebuild_projection(db, agent_id, "research_trust_v2")
+    projection = rebuild_projection(db, agent_id, "research_trust_v3")
     db.commit()
     return {"agent": agent_to_dict(agent), "reputation": projection_dict(projection), **history}
 
@@ -809,7 +854,7 @@ def sync_indexer(db: Session = Depends(get_db)) -> dict:
 def rebuild_projections(db: Session = Depends(get_db)) -> dict:
     projections = rebuild_all_projections(db)
     db.commit()
-    return {"rebuilt": len(projections), "projections": ["research_trust_v1", "research_trust_v2"]}
+    return {"rebuilt": len(projections), "projections": ["research_trust_v1", "research_trust_v2", "research_trust_v3", "platform_credibility_v1"]}
 
 
 @app.post("/trust/evaluate", dependencies=[Depends(require_key)])
@@ -818,7 +863,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v2")
+    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v3")
     judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
     fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
     fraud_incidents = reputation.fraud_incidents
@@ -1170,6 +1215,24 @@ def write_contract_json(method: str, payload: dict, expected_event_id: str) -> d
 
 def platform_to_dict(platform: Platform) -> dict:
     return {"id": platform.id, "name": platform.name, "owner_wallet": platform.owner_wallet, "webhook_url": platform.webhook_url}
+
+
+def platform_credibility_dict(projection: PlatformCredibilityProjection) -> dict:
+    return {
+        "platform_id": projection.platform_id,
+        "projection": f"platform_credibility_{projection.projection_version}",
+        "credibility_score": projection.credibility_score,
+        "credibility_bps": projection.credibility_score * 100,
+        "status": projection.status,
+        "attestations_issued": projection.attestations_issued,
+        "confirmations_received": projection.confirmations_received,
+        "challenges": projection.challenges,
+        "overturns": projection.overturns,
+        "verified_identity": projection.verified_identity,
+        "last_event_id": projection.last_event_id,
+        "calculated_at": projection.calculated_at.isoformat(),
+        "details": projection.details,
+    }
 
 
 def agent_to_dict(agent: Agent) -> dict:

@@ -212,6 +212,25 @@ class AgentReputationProjection(Base):
     details: Mapped[dict] = mapped_column(JsonType, default=dict)
 
 
+class PlatformCredibilityProjection(Base):
+    __tablename__ = "platform_credibility_projections"
+    __table_args__ = (UniqueConstraint("platform_id", "projection_version", name="uq_platform_credibility_projection"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("platform_projection"))
+    platform_id: Mapped[str] = mapped_column(ForeignKey("platforms.id"), nullable=False, index=True)
+    projection_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+    credibility_score: Mapped[int] = mapped_column(Integer, default=50)
+    status: Mapped[str] = mapped_column(String(40), default="unverified")
+    attestations_issued: Mapped[int] = mapped_column(Integer, default=0)
+    confirmations_received: Mapped[int] = mapped_column(Integer, default=0)
+    challenges: Mapped[int] = mapped_column(Integer, default=0)
+    overturns: Mapped[int] = mapped_column(Integer, default=0)
+    verified_identity: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    details: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+
 class DemoRun(Base):
     __tablename__ = "demo_runs"
 
