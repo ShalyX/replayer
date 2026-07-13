@@ -43,6 +43,33 @@ class DisputeOpen(BaseModel):
     bond_amount: float = 0
 
 
+class AttestationCreate(BaseModel):
+    agent_id: str
+    platform_id: str
+    type: str
+    value: int = Field(ge=1, le=10_000)
+    category: str = "research"
+    period_start: str
+    period_end: str
+    evidence_uri: str
+    evidence_hash: str
+
+
+class AttestationConfirm(BaseModel):
+    platform_id: str
+    value: int = Field(ge=1, le=10_000)
+    counterparty_id: str = ""
+    evidence_uri: str
+    evidence_hash: str
+
+
+class EventChallenge(BaseModel):
+    challenger_id: str = "agent_owner"
+    reason: str
+    evidence_uri: str
+    evidence_hash: str = ""
+
+
 class ReputationOut(BaseModel):
     agent_id: str
     overall: int

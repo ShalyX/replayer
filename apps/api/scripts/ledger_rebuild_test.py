@@ -12,7 +12,11 @@ from app.models import AgentReputationProjection
 
 
 def normalized(db):
-    rows = db.scalars(select(AgentReputationProjection).order_by(AgentReputationProjection.agent_id)).all()
+    rows = db.scalars(select(AgentReputationProjection).order_by(
+        AgentReputationProjection.agent_id,
+        AgentReputationProjection.projection_name,
+        AgentReputationProjection.projection_version,
+    )).all()
     return [{key: value for key, value in projection_dict(row).items() if key != "calculated_at"} for row in rows]
 
 

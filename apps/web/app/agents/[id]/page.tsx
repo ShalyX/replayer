@@ -25,6 +25,10 @@ type Profile = {
 export default async function AgentProfile({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const profile = await api<Profile>(`/agents/${id}/profile`);
+  const workHistory = (profile.reputation.details?.verified_work_history || []) as Array<{
+    event_id: string; type: string; value: number; platform_id: string;
+    provenance: string; verification_status: string; contribution: number;
+  }>;
 
   return (
     <main className="shell">
@@ -52,6 +56,23 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       </section>
 
       <section className="grid section-gap">
+        <section className="panel">
+          <h2>Verified Work History</h2>
+          <table className="table">
+            <thead><tr><th>Claim</th><th>Platform</th><th>Provenance</th><th>Trust</th></tr></thead>
+            <tbody>
+              {workHistory.map((item) => (
+                <tr key={item.event_id}>
+                  <td>{item.value} {item.type.replaceAll("_", " ")}</td>
+                  <td>{item.platform_id}</td>
+                  <td><span className={item.provenance === "superseded" ? "pill bad" : "pill"}>{item.provenance.replaceAll("_", " ")}</span></td>
+                  <td>{item.contribution > 0 ? `+${item.contribution}` : "0"}</td>
+                </tr>
+              ))}
+              {workHistory.length === 0 ? <tr><td colSpan={4}>No work-history attestations yet.</td></tr> : null}
+            </tbody>
+          </table>
+        </section>
         <section className="panel">
           <h2>Job History</h2>
           <table className="table">

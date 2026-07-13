@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import sqrt
 from typing import Iterable
 
 from sqlalchemy import delete, select
@@ -22,13 +23,14 @@ EVENT_TYPES = {
     "AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED",
     "JOB_COMPLETED", "DISPUTE_OPENED", "JUDGMENT_PROVISIONAL", "JUDGMENT_FINALIZED",
     "FRAUD_CONFIRMED", "AGENT_CLEARED", "EVENT_ATTESTED", "EVENT_CHALLENGED",
-    "EVENT_SUPERSEDED", "POLICY_EVALUATED",
+    "EVENT_SUPERSEDED", "POLICY_EVALUATED", "REPUTATION_ATTESTED",
+    "COUNTERPARTY_CONFIRMED", "ATTESTATION_JUDGMENT_FINALIZED",
 }
 PROVENANCE = {
     "platform_reported", "counterparty_confirmed", "genlayer_provisional",
     "genlayer_verified", "challenged", "superseded",
 }
-VERIFICATION_STATUSES = {"pending", "provisional", "finalized", "appealed", "superseded"}
+VERIFICATION_STATUSES = {"pending", "provisional", "finalized", "appealed", "superseded", "uncontested"}
 
 
 def append_event(
@@ -117,7 +119,11 @@ def event_dict(db: Session, event: ReputationEvent) -> dict:
     }
 
 
-def rebuild_projection(db: Session, agent_id: str) -> AgentReputationProjection:
+def rebuild_projection(db: Session, agent_id: str, projection: str = "research_trust_v1") -> AgentReputationProjection:
+    if projection == "research_trust_v2":
+        return rebuild_projection_v2(db, agent_id)
+    if projection != "research_trust_v1":
+        raise ValueError(f"Unsupported projection: {projection}")
     all_events = db.scalars(
         select(ReputationEvent)
         .where(ReputationEvent.agent_id == agent_id)
@@ -205,7 +211,105 @@ def rebuild_all_projections(db: Session) -> list[AgentReputationProjection]:
         AgentReputationProjection.projection_name == PROJECTION_NAME,
         AgentReputationProjection.projection_version == PROJECTION_VERSION,
     ))
-    return [rebuild_projection(db, agent_id) for agent_id in agent_ids]
+    projections = [rebuild_projection(db, agent_id) for agent_id in agent_ids]
+    db.execute(delete(AgentReputationProjection).where(
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v2",
+    ))
+    projections.extend(rebuild_projection_v2(db, agent_id) for agent_id in agent_ids)
+    return projections
+
+
+def rebuild_projection_v2(db: Session, agent_id: str) -> AgentReputationProjection:
+    events = db.scalars(
+        select(ReputationEvent)
+        .where(ReputationEvent.agent_id == agent_id)
+        .order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)
+    ).all()
+    events = [event for event in events if not event.contract_address or event.event_metadata.get("contract_readback_verified") is True]
+    superseded = {
+        reference.referenced_event_id
+        for reference in db.scalars(select(ReputationEventReference).where(
+            ReputationEventReference.event_id.in_([event.event_id for event in events if event.event_type == "EVENT_SUPERSEDED"])
+        )).all()
+    }
+    challenged = {
+        reference.referenced_event_id
+        for reference in db.scalars(select(ReputationEventReference).where(
+            ReputationEventReference.event_id.in_([event.event_id for event in events if event.event_type == "EVENT_CHALLENGED"])
+        )).all()
+    }
+
+    base = rebuild_projection(db, agent_id, "research_trust_v1")
+    trust = base.trust_score
+    work_history = []
+    for event in events:
+        if event.event_type not in {"REPUTATION_ATTESTED", "COUNTERPARTY_CONFIRMED"}:
+            continue
+        metadata = event.event_metadata
+        value = max(0, min(10_000, int(metadata.get("value") or 0)))
+        target = str(metadata.get("attestation_event_id") or event.event_id)
+        is_superseded = event.event_id in superseded or target in superseded
+        is_challenged = event.event_id in challenged or target in challenged
+        contribution = 0
+        if not is_superseded and metadata.get("type") == "jobs_completed" and event.evidence_uri and event.evidence_hash:
+            diminishing = min(6, int(sqrt(value)))
+            if event.provenance == "genlayer_verified":
+                contribution = min(10, diminishing + 3)
+            elif event.provenance == "counterparty_confirmed":
+                contribution = min(5, diminishing)
+            else:
+                contribution = min(6, diminishing)
+            if is_challenged:
+                contribution //= 2
+        trust += contribution
+        work_history.append({
+            "event_id": event.event_id,
+            "type": metadata.get("type"),
+            "value": value,
+            "platform_id": event.platform_id,
+            "provenance": "superseded" if is_superseded else event.provenance,
+            "verification_status": "superseded" if is_superseded else event.verification_status,
+            "contribution": contribution,
+            "references": [target] if target != event.event_id else [],
+        })
+    trust = max(0, min(100, trust))
+    projection_row = db.scalars(select(AgentReputationProjection).where(
+        AgentReputationProjection.agent_id == agent_id,
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v2",
+    )).first()
+    if not projection_row:
+        projection_row = AgentReputationProjection(agent_id=agent_id, projection_name="research_trust", projection_version="v2")
+        db.add(projection_row)
+    projection_row.trust_score = trust
+    projection_row.risk_score = base.risk_score
+    projection_row.status = base.status
+    projection_row.completed_jobs = base.completed_jobs
+    projection_row.successful_jobs = base.successful_jobs
+    projection_row.disputes = base.disputes
+    projection_row.fraud_incidents = base.fraud_incidents
+    projection_row.last_event_id = events[-1].event_id if events else None
+    projection_row.calculated_at = datetime.utcnow()
+    projection_row.details = {**base.details, "verified_work_history": work_history, "attestation_projection": True}
+    ensure_projection_version_v2(db)
+    db.flush()
+    return projection_row
+
+
+def ensure_projection_version_v2(db: Session) -> None:
+    existing = db.scalars(select(ProjectionVersion).where(
+        ProjectionVersion.projection_name == "research_trust", ProjectionVersion.version == "v2"
+    )).first()
+    if not existing:
+        db.add(ProjectionVersion(
+            projection_name="research_trust", version="v2", configuration={
+                "attestation_type": "jobs_completed", "reported_cap": 6,
+                "confirmed_cap": 5, "genlayer_verified_cap": 10,
+                "requires_evidence_uri": True, "requires_evidence_hash": True,
+                "diminishing_returns": "floor(sqrt(value))", "superseded_weight": 0,
+            },
+        ))
 
 
 def ensure_projection_version(db: Session) -> None:

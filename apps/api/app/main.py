@@ -17,7 +17,10 @@ from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
 from .ledger import append_event, event_dict, projection_dict, rebuild_all_projections, rebuild_projection
 from .models import Agent, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, ReputationEvent, new_id
-from .schemas import AgentRegister, DeliverableSubmit, DisputeOpen, JobCreate, PlatformRegister, TrustEvaluateRequest
+from .schemas import (
+    AgentRegister, AttestationConfirm, AttestationCreate, DeliverableSubmit,
+    DisputeOpen, EventChallenge, JobCreate, PlatformRegister, TrustEvaluateRequest,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -341,7 +344,7 @@ def platform_agents(platform_id: str, db: Session = Depends(get_db)) -> dict:
     return {
         "platform": platform_to_dict(platform),
         "agents": [
-            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id))}
+            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v2"))}
             for agent in agents
         ],
     }
@@ -620,13 +623,118 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
             "event": event_dict(db, judgment_event)}
 
 
+@app.post("/attestations")
+def create_attestation(payload: AttestationCreate, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    authorize_platform(auth, payload.platform_id)
+    if payload.type != "jobs_completed":
+        raise HTTPException(status_code=400, detail="V2.1 supports jobs_completed attestations")
+    if not payload.evidence_uri or not payload.evidence_hash:
+        raise HTTPException(status_code=400, detail="Attestations require evidence_uri and evidence_hash")
+    agent = db.get(Agent, payload.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    if not db.get(Platform, payload.platform_id):
+        raise HTTPException(status_code=404, detail="Unknown platform")
+    event_id = new_id("rep_evt_attestation")
+    metadata = {
+        "type": payload.type, "value": payload.value,
+        "period_start": payload.period_start, "period_end": payload.period_end,
+    }
+    contract_payload = {
+        "event_id": event_id, "event_type": "REPUTATION_ATTESTED",
+        "agent_id": payload.agent_id, "platform_id": payload.platform_id,
+        "category": payload.category, "evidence_uri": payload.evidence_uri,
+        "evidence_hash": payload.evidence_hash, "references": [], "metadata": metadata,
+    }
+    tx = write_contract_json("append_platform_event", contract_payload, event_id)
+    event = append_event(
+        db, event_id=event_id, event_type="REPUTATION_ATTESTED", agent_id=payload.agent_id,
+        platform_id=payload.platform_id, category=payload.category, provenance="platform_reported",
+        verification_status="uncontested", evidence_uri=payload.evidence_uri,
+        evidence_hash=payload.evidence_hash, contract_address=genlayer.contract_address,
+        transaction_hash=tx.get("tx_id") or None, metadata={**metadata, "contract_readback_verified": True},
+    )
+    projection = rebuild_projection(db, payload.agent_id, "research_trust_v2")
+    db.commit()
+    return {"event": event_dict(db, event), "reputation": projection_dict(projection), "tx": tx}
+
+
+@app.post("/attestations/{event_id}/confirm")
+def confirm_attestation(event_id: str, payload: AttestationConfirm, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    authorize_platform(auth, payload.platform_id)
+    original = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
+    if not original or original.event_type != "REPUTATION_ATTESTED":
+        raise HTTPException(status_code=404, detail="Unknown attestation")
+    if payload.value > int(original.event_metadata.get("value") or 0):
+        raise HTTPException(status_code=400, detail="Confirmation cannot exceed the reported value")
+    confirmation_id = new_id("rep_evt_confirmation")
+    metadata = {
+        "type": original.event_metadata.get("type"), "value": payload.value,
+        "attestation_event_id": event_id,
+    }
+    contract_payload = {
+        "event_id": confirmation_id, "agent_id": original.agent_id, "platform_id": payload.platform_id,
+        "counterparty_id": payload.counterparty_id, "category": original.category or "research",
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "attestation_event_id": event_id, "metadata": metadata,
+    }
+    tx = write_contract_json("confirm_attestation", contract_payload, confirmation_id)
+    event = append_event(
+        db, event_id=confirmation_id, event_type="COUNTERPARTY_CONFIRMED", agent_id=original.agent_id,
+        platform_id=payload.platform_id, counterparty_id=payload.counterparty_id,
+        category=original.category, provenance="counterparty_confirmed", verification_status="finalized",
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash, references=[event_id],
+        contract_address=genlayer.contract_address, transaction_hash=tx.get("tx_id") or None,
+        metadata={**metadata, "contract_readback_verified": True},
+    )
+    projection = rebuild_projection(db, original.agent_id, "research_trust_v2")
+    db.commit()
+    return {"event": event_dict(db, event), "reputation": projection_dict(projection), "tx": tx}
+
+
+@app.post("/events/{event_id}/challenge")
+def challenge_attestation(event_id: str, payload: EventChallenge, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    original = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == event_id)).first()
+    if not original or original.event_type != "REPUTATION_ATTESTED":
+        raise HTTPException(status_code=404, detail="Unknown attestation")
+    challenge_id = new_id("rep_evt_challenge")
+    judgment_id = new_id("rep_evt_attestation_judgment")
+    superseded_id = new_id("rep_evt_superseded")
+    replacement_id = new_id("rep_evt_attestation_corrected")
+    contract_payload = {
+        "event_id": challenge_id, "attestation_event_id": event_id,
+        "agent_id": original.agent_id, "platform_id": original.platform_id,
+        "category": original.category or "research", "evidence_uri": payload.evidence_uri,
+        "evidence_hash": payload.evidence_hash, "counterparty_id": payload.challenger_id,
+        "metadata": {"reason": payload.reason, "judgment_event_id": judgment_id,
+                     "superseded_event_id": superseded_id, "replacement_event_id": replacement_id},
+    }
+    tx = write_contract_json("challenge_attestation", contract_payload, judgment_id)
+    indexer.sync_once(db)
+    judgment = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == judgment_id)).first()
+    if not judgment:
+        raise RuntimeError("GenLayer attestation judgment was not indexed")
+    for created_event_id in (challenge_id, judgment_id, superseded_id, replacement_id):
+        created_event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == created_event_id)).first()
+        if created_event:
+            created_event.transaction_hash = tx.get("tx_id") or created_event.transaction_hash
+            created_event.contract_address = genlayer.contract_address
+            created_event.event_metadata = {**created_event.event_metadata, "contract_readback_verified": True}
+    projection = rebuild_projection(db, original.agent_id, "research_trust_v2")
+    db.commit()
+    return {"judgment": event_dict(db, judgment), "reputation": projection_dict(projection), "tx": tx}
+
+
 @app.get("/agents/{agent_id}/reputation")
 def get_reputation(agent_id: str, projection: str = "research_trust_v1", db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    if projection != "research_trust_v1":
+    if projection not in {"research_trust_v1", "research_trust_v2"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
-    result = rebuild_projection(db, agent_id)
+    result = rebuild_projection(db, agent_id, projection)
     db.commit()
     return projection_dict(result)
 
@@ -656,7 +764,7 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
     history = get_history(agent_id, db)
-    projection = rebuild_projection(db, agent_id)
+    projection = rebuild_projection(db, agent_id, "research_trust_v2")
     db.commit()
     return {"agent": agent_to_dict(agent), "reputation": projection_dict(projection), **history}
 
@@ -710,7 +818,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    reputation = rebuild_projection(db, payload.agent_id)
+    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v2")
     judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
     fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
     fraud_incidents = reputation.fraud_incidents
@@ -1043,6 +1151,21 @@ def write_platform_event(
         f"GenLayer accepted transaction {tx.get('tx_id', '')}, but event {event_id} was not readable from contract state. "
         f"Execution: {tx.get('execution_result', 'unknown')}. Contract error: {tx.get('contract_error') or 'none reported'}"
     )
+
+
+def write_contract_json(method: str, payload: dict, expected_event_id: str) -> dict:
+    existing = genlayer.call_json("get_event", [expected_event_id])
+    if isinstance(existing, dict) and existing.get("event_id") == expected_event_id:
+        return {"mode": "live", "method": method, "tx_id": "", "contract_address": genlayer.contract_address,
+                "contract_event": existing, "idempotent_replay": True}
+    tx = genlayer.write(method, [json.dumps(payload, sort_keys=True)])
+    for _ in range(settings.genlayer_read_attempts):
+        contract_event = genlayer.call_json("get_event", [expected_event_id])
+        if isinstance(contract_event, dict) and contract_event.get("event_id") == expected_event_id:
+            tx["contract_event"] = contract_event
+            return tx
+        time.sleep(settings.genlayer_read_interval_seconds)
+    raise RuntimeError(f"GenLayer transaction {tx.get('tx_id', '')} did not expose event {expected_event_id}")
 
 
 def platform_to_dict(platform: Platform) -> dict:

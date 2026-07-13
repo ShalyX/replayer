@@ -16,6 +16,8 @@
     "indexer:once": "cd apps/api && python scripts/indexer_service.py --once",
     "projections:rebuild": "cd apps/api && python scripts/projections_rebuild.py",
     "ledger:verify": "cd apps/api && python scripts/ledger_verify.py",
-    "ledger:rebuild-test": "cd apps/api && python scripts/ledger_rebuild_test.py"
+    "ledger:rebuild-test": "cd apps/api && python scripts/ledger_rebuild_test.py",
+    "smoke:v2.1": "cd apps/api && python scripts/v2_1_projection_smoke.py",
+    "acceptance:v2.1": "cd apps/api && python scripts/v2_1_live_acceptance.py"
   }
 }

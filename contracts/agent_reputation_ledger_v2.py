@@ -17,12 +17,122 @@ class ReputationEventLedger(gl.Contract):
     @gl.public.write
     def append_platform_event(self, event_json: str) -> None:
         event = self._object(event_json)
-        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED"]
+        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED"]
         if str(event.get("event_type", "")) not in allowed:
             raise gl.vm.UserError("[EXPECTED] Unsupported platform event")
         event["provenance"] = "platform_reported"
-        event["verification_status"] = "finalized"
+        event["verification_status"] = "uncontested" if event["event_type"] == "REPUTATION_ATTESTED" else "finalized"
         self._append(event)
+
+    @gl.public.write
+    def confirm_attestation(self, event_json: str) -> None:
+        event = self._object(event_json)
+        original_id = str(event.get("attestation_event_id", ""))
+        if original_id not in self.events:
+            raise gl.vm.UserError("[EXPECTED] Unknown attestation")
+        event["event_type"] = "COUNTERPARTY_CONFIRMED"
+        event["provenance"] = "counterparty_confirmed"
+        event["verification_status"] = "finalized"
+        event["references"] = [original_id]
+        self._append(event)
+
+    @gl.public.write
+    def challenge_attestation(self, challenge_json: str) -> None:
+        challenge = self._object(challenge_json)
+        original_id = str(challenge.get("attestation_event_id", ""))
+        if original_id not in self.events:
+            raise gl.vm.UserError("[EXPECTED] Unknown attestation")
+        original = json.loads(self.events[original_id])
+        original_value = int(original.get("metadata", {}).get("value", 0))
+        challenge["event_type"] = "EVENT_CHALLENGED"
+        challenge["provenance"] = "challenged"
+        challenge["verification_status"] = "pending"
+        challenge["references"] = [original_id]
+        self._append(challenge)
+
+        evaluation_payload = json.dumps({
+            "attestation": original,
+            "challenge_reason": challenge.get("metadata", {}).get("reason", ""),
+            "challenge_evidence_uri": challenge.get("evidence_uri", ""),
+            "challenge_evidence_hash": challenge.get("evidence_hash", ""),
+        }, sort_keys=True)
+
+        def evaluate() -> str:
+            raw = gl.nondet.exec_prompt(
+                "Evaluate a challenged marketplace reputation attestation using the supplied evidence. "
+                "Return only JSON with outcome (attestation_valid, attestation_partially_valid, "
+                "attestation_false, or inconclusive), valid_value as a non-negative integer no greater "
+                "than the reported value, confidence_bps (0-10000), and reasoning_summary.\n\n" + evaluation_payload,
+                response_format="json",
+            )
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            outcome = str(parsed.get("outcome", "inconclusive")).lower()
+            if outcome not in ["attestation_valid", "attestation_partially_valid", "attestation_false", "inconclusive"]:
+                outcome = "inconclusive"
+            valid_value = max(0, min(original_value, int(parsed.get("valid_value", 0))))
+            if outcome == "attestation_valid":
+                valid_value = original_value
+            if outcome == "attestation_false":
+                valid_value = 0
+            return json.dumps({
+                "outcome": outcome,
+                "valid_value": valid_value,
+                "reported_value": original_value,
+                "confidence_bps": max(0, min(10000, int(parsed.get("confidence_bps", 0)))),
+                "reasoning_summary": str(parsed.get("reasoning_summary", ""))[:1200],
+            }, sort_keys=True)
+
+        judgment = json.loads(gl.eq_principle.prompt_comparative(
+            evaluate,
+            principle=(
+                "The outcome must match exactly. Valid values may differ by at most 2. "
+                "Confidence may differ by at most 1500 basis points. Reasoning must identify "
+                "materially the same evidence and discrepancy."
+            ),
+        ))
+        judgment_event_id = str(challenge["metadata"]["judgment_event_id"])
+        self._append({
+            "event_id": judgment_event_id,
+            "event_type": "ATTESTATION_JUDGMENT_FINALIZED",
+            "agent_id": str(original["agent_id"]),
+            "platform_id": str(original["platform_id"]),
+            "category": str(original.get("category", "research")),
+            "provenance": "genlayer_verified",
+            "verification_status": "finalized",
+            "evidence_uri": str(challenge.get("evidence_uri", "")),
+            "evidence_hash": str(challenge.get("evidence_hash", "")),
+            "references": [original_id, str(challenge["event_id"])],
+            "metadata": judgment,
+        })
+        if judgment["outcome"] in ["attestation_partially_valid", "attestation_false"]:
+            self._append({
+                "event_id": str(challenge["metadata"]["superseded_event_id"]),
+                "event_type": "EVENT_SUPERSEDED",
+                "agent_id": str(original["agent_id"]),
+                "platform_id": str(original["platform_id"]),
+                "category": str(original.get("category", "research")),
+                "provenance": "superseded",
+                "verification_status": "superseded",
+                "references": [original_id],
+                "metadata": {"judgment_event_id": judgment_event_id},
+            })
+        if judgment["valid_value"] > 0 and judgment["outcome"] == "attestation_partially_valid":
+            replacement_metadata = dict(original.get("metadata", {}))
+            replacement_metadata["value"] = int(judgment["valid_value"])
+            replacement_metadata["corrects_event_id"] = original_id
+            self._append({
+                "event_id": str(challenge["metadata"]["replacement_event_id"]),
+                "event_type": "REPUTATION_ATTESTED",
+                "agent_id": str(original["agent_id"]),
+                "platform_id": str(original["platform_id"]),
+                "category": str(original.get("category", "research")),
+                "provenance": "genlayer_verified",
+                "verification_status": "finalized",
+                "evidence_uri": str(original.get("evidence_uri", "")),
+                "evidence_hash": str(original.get("evidence_hash", "")),
+                "references": [original_id, judgment_event_id],
+                "metadata": replacement_metadata,
+            })
 
     @gl.public.write
     def open_challenge(self, event_json: str) -> None:
