@@ -137,6 +137,26 @@ def acquire_ledger_write_lock(db: Session) -> None:
         db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 724_726_592})
 
 
+def read_identity_projection(db: Session, agent_id: str) -> AgentIdentityProjection:
+    projection = db.scalars(select(AgentIdentityProjection).where(
+        AgentIdentityProjection.agent_id == agent_id,
+        AgentIdentityProjection.projection_version == "v1",
+    )).first()
+    return projection or rebuild_identity_projection(db, agent_id)
+
+
+def read_reputation_projection(
+    db: Session, agent_id: str, projection: str = "research_trust_v4"
+) -> AgentReputationProjection:
+    projection_name, projection_version = projection.rsplit("_", 1)
+    stored = db.scalars(select(AgentReputationProjection).where(
+        AgentReputationProjection.agent_id == agent_id,
+        AgentReputationProjection.projection_name == projection_name,
+        AgentReputationProjection.projection_version == projection_version,
+    )).first()
+    return stored or rebuild_projection(db, agent_id, projection)
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)) -> dict:
     if settings.genlayer_mode != "live" and not settings.allow_test_mocks:
@@ -346,7 +366,7 @@ def platform_agents(platform_id: str, db: Session = Depends(get_db)) -> dict:
     return {
         "platform": platform_to_dict(platform),
         "agents": [
-            agent_to_dict(agent) | {"reputation": projection_dict(rebuild_projection(db, agent.id, "research_trust_v4"))}
+            agent_to_dict(agent) | {"reputation": projection_dict(read_reputation_projection(db, agent.id))}
             for agent in agents
         ],
     }
@@ -869,7 +889,7 @@ def challenge_identity_binding(proposal_event_id: str, payload: IdentityBindingC
 def get_agent_identity(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    projection = rebuild_identity_projection(db, agent_id)
+    projection = read_identity_projection(db, agent_id)
     db.commit()
     return identity_projection_dict(projection)
 
@@ -880,14 +900,13 @@ def resolve_identity(identity: str, db: Session = Depends(get_db)) -> dict:
         normalized = normalize_identity(identity)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    rebuild_all_identity_projections(db)
     projection = db.scalars(select(AgentIdentityProjection).where(
         AgentIdentityProjection.projection_version == "v1"
     )).all()
     matched = next((row for row in projection if normalized in (row.aliases or [])), None)
     if not matched:
         raise HTTPException(status_code=404, detail="Unknown identity")
-    reputation = rebuild_projection(db, matched.agent_id, "research_trust_v4")
+    reputation = read_reputation_projection(db, matched.agent_id)
     db.commit()
     return {"identity": identity_projection_dict(matched), "reputation": projection_dict(reputation),
             "passport_url": f"/agents/{matched.canonical_agent_id}/profile"}
@@ -1012,7 +1031,7 @@ def get_reputation(agent_id: str, projection: str = "research_trust_v4", db: Ses
         raise HTTPException(status_code=404, detail="Unknown agent")
     if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
-    result = rebuild_projection(db, agent_id, projection)
+    result = read_reputation_projection(db, agent_id, projection)
     db.commit()
     return projection_dict(result)
 
@@ -1021,7 +1040,7 @@ def get_reputation(agent_id: str, projection: str = "research_trust_v4", db: Ses
 def get_history(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    identity = rebuild_identity_projection(db, agent_id)
+    identity = read_identity_projection(db, agent_id)
     member_ids = identity.linked_agents or [agent_id]
     jobs = db.scalars(select(Job).where(Job.provider_agent_id.in_(member_ids)).order_by(Job.created_at.desc())).all()
     ledger_events = db.scalars(select(ReputationEvent).where(
@@ -1046,9 +1065,9 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
     history = get_history(agent_id, db)
-    identity = rebuild_identity_projection(db, agent_id)
+    identity = read_identity_projection(db, agent_id)
     canonical_agent = db.get(Agent, identity.canonical_agent_id) or agent
-    projection = rebuild_projection(db, agent_id, "research_trust_v4")
+    projection = read_reputation_projection(db, agent_id)
     db.commit()
     return {"agent": agent_to_dict(canonical_agent), "requested_alias": agent_to_dict(agent),
             "identity": identity_projection_dict(identity), "reputation": projection_dict(projection), **history}
@@ -1058,7 +1077,7 @@ def public_profile(agent_id: str, db: Session = Depends(get_db)) -> dict:
 def get_agent_events(agent_id: str, limit: int = 100, db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    identity = rebuild_identity_projection(db, agent_id)
+    identity = read_identity_projection(db, agent_id)
     events = db.scalars(select(ReputationEvent).where(
         ReputationEvent.agent_id.in_(identity.linked_agents or [agent_id])
     ).order_by(ReputationEvent.occurred_at.desc()).limit(min(limit, 500))).all()
