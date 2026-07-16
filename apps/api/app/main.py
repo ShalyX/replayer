@@ -1013,6 +1013,15 @@ def dispute_delegated_responsibility(delegation_id: str, payload: Responsibility
         ReputationEvent.event_id == contract_event_id("delegated_output_submitted", delegation.id)
     )).first()
     job = require_job(db, delegation.job_id)
+    db.add(Dispute(
+        id=case_id,
+        job_id=delegation.job_id,
+        claimant=payload.claimant_id,
+        reason=payload.reason,
+        evidence_uri=payload.evidence_uri,
+        status="responsibility_open",
+    ))
+    db.flush()
     contract_payload = {
         "responsibility_case_id": case_id, "delegation_id": delegation.id,
         "principal_agent_id": delegation.principal_agent_id, "worker_agent_id": delegation.worker_agent_id,
