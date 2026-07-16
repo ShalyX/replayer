@@ -22,7 +22,7 @@ Fill these in the Render Blueprint screen:
 ```bash
 ADMIN_API_KEY=generate-a-long-random-value
 API_KEY=optional-backwards-compatible-dev-key
-GENLAYER_CONTRACT_ADDRESS=0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A
+GENLAYER_CONTRACT_ADDRESS=0xd6B933d895dAc6c171587D47049F8bF03C0e9E34
 ```
 
 The V2 public runtime requires:

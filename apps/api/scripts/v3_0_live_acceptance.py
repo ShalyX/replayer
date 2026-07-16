@@ -35,6 +35,7 @@ def post(path, body=None):
 
 
 suffix = os.getenv("V3_ACCEPTANCE_SUFFIX", str(int(time.time())))
+runtime_health = request("/health")[1]
 platform_id = f"delegation_market_{suffix}"
 principal_id = f"agent_a_{suffix}"
 worker_id = f"agent_b_{suffix}"
@@ -47,6 +48,8 @@ for agent_id, name in [(principal_id, "Principal Research Agent A"), (worker_id,
         "agent_id": agent_id, "platform_id": platform_id, "agent_name": name,
         "capabilities": ["research", "citations"],
     })
+principal_before = request(f"/agents/{principal_id}/reputation?projection=research_trust_v6")[1]
+worker_before = request(f"/agents/{worker_id}/reputation?projection=research_trust_v6")[1]
 post("/jobs", {
     "job_id": job_id, "platform_id": platform_id, "requester_id": "buyer_v3",
     "provider_agent_id": principal_id,
@@ -113,20 +116,55 @@ if resolution is None:
 assert resolution["outcome"] == "shared_responsibility"
 assert resolution["delegator_responsibility_bps"] == 3000
 assert resolution["worker_responsibility_bps"] == 7000
-principal_before = request(f"/agents/{principal_id}/reputation?projection=research_trust_v6")[1]
-worker_before = request(f"/agents/{worker_id}/reputation?projection=research_trust_v6")[1]
-post("/admin/projections/rebuild")
-principal_after = request(f"/agents/{principal_id}/reputation?projection=research_trust_v6")[1]
-worker_after = request(f"/agents/{worker_id}/reputation?projection=research_trust_v6")[1]
-for before, after in [(principal_before, principal_after), (worker_before, worker_after)]:
+principal_final = request(f"/agents/{principal_id}/reputation?projection=research_trust_v6")[1]
+worker_final = request(f"/agents/{worker_id}/reputation?projection=research_trust_v6")[1]
+
+marketplace_c_id = f"accountability_reader_{suffix}"
+post("/platforms/register", {"platform_id": marketplace_c_id, "platform_name": "Accountability Reader Market"})
+marketplace_c_readback = {
+    "principal": request(f"/agents/{principal_id}/profile")[1],
+    "worker": request(f"/agents/{worker_id}/profile")[1],
+    "delegation": request(f"/delegations/{delegation_id}")[1],
+}
+
+indexer = None
+for _ in range(20):
+    post("/admin/indexer/sync")
+    indexer = request("/health/indexer")[1]
+    if indexer.get("status") == "healthy" and indexer.get("lag") == 0:
+        break
+    time.sleep(3)
+if not indexer or indexer.get("status") != "healthy" or indexer.get("lag") != 0:
+    raise SystemExit(f"Indexer did not reach zero lag: {json.dumps(indexer)}")
+
+rebuild = post("/admin/projections/rebuild")
+principal_replayed = request(f"/agents/{principal_id}/reputation?projection=research_trust_v6")[1]
+worker_replayed = request(f"/agents/{worker_id}/reputation?projection=research_trust_v6")[1]
+for before, after in [(principal_final, principal_replayed), (worker_final, worker_replayed)]:
     for field in ("trust_score", "risk_score", "status", "fraud_incidents"):
         assert before[field] == after[field]
 
 print(json.dumps({
     "status": "passed", "delegation_id": delegation_id,
     "responsibility_case_id": opened["responsibility_case_id"],
+    "contract_address": runtime_health["contract_address"],
     "transaction_hash": resolution["protocol"]["transaction_hash"],
     "outcome": resolution["outcome"], "delegator_bps": 3000, "worker_bps": 7000,
-    "principal_trust": principal_after["trust_score"], "worker_trust": worker_after["trust_score"],
+    "before": {
+        "principal": {"trust_score": principal_before["trust_score"], "risk_score": principal_before["risk_score"]},
+        "worker": {"trust_score": worker_before["trust_score"], "risk_score": worker_before["risk_score"]},
+    },
+    "after": {
+        "principal": {"trust_score": principal_final["trust_score"], "risk_score": principal_final["risk_score"]},
+        "worker": {"trust_score": worker_final["trust_score"], "risk_score": worker_final["risk_score"]},
+    },
+    "marketplace_c": {
+        "platform_id": marketplace_c_id,
+        "principal_event_count": len(marketplace_c_readback["principal"]["events"]),
+        "worker_event_count": len(marketplace_c_readback["worker"]["events"]),
+        "delegation_event_count": len(marketplace_c_readback["delegation"]["events"]),
+    },
+    "indexer": indexer,
+    "projection_rebuild": rebuild,
     "replay_identical": True,
 }, indent=2))

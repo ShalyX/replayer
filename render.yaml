@@ -21,7 +21,7 @@ services:
       - key: ALLOW_TEST_MOCKS
         value: "false"
       - key: GENLAYER_CONTRACT_ADDRESS
-        value: 0xBf42bB13fb77695d42B08eCdf589Ba54eB1C361A
+        value: 0xd6B933d895dAc6c171587D47049F8bF03C0e9E34
       - key: GENLAYER_NETWORK
         value: studionet
       - key: GENLAYER_ACCOUNT_PASSWORD

@@ -2,6 +2,9 @@
 
 ## Current implementation proof
 
+- Studionet contract: `0xd6B933d895dAc6c171587D47049F8bF03C0e9E34`.
+- Deployment transaction: `0x03f1ec0eb3a8cde696ce636041fbc96ffdd2d6178e721be590f46860c39f10a5`.
+- Deployment consensus: accepted with 5 of 5 validators agreeing on 2026-07-16.
 - Contract AST parse: passed on 2026-07-14.
 - GenVM AST lint: passed 3 checks on 2026-07-14.
 - Deterministic V3 smoke command: `npm run smoke:v3.0`.
@@ -29,4 +32,3 @@ Exact result:
 ```
 
 Semantic lint is not marked successful. Live V3 contract deployment, responsibility transaction hashes, contract readback, indexer health, and no-mock acceptance evidence must be added here after deployment.
-
