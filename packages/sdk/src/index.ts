@@ -273,6 +273,55 @@ export type AppealInput = {
   bond_amount?: string;
 };
 
+export type DelegationInput = {
+  delegation_id?: string;
+  principal_agent_id: string;
+  worker_agent_id: string;
+  platform_id: string;
+  job_id: string;
+  parent_delegation_id?: string;
+  authority_scope: string;
+  permitted_tools?: string[];
+  permitted_actions?: string[];
+  spending_limit?: number;
+  currency?: string;
+  allow_subdelegation?: boolean;
+  disclosure_required?: boolean;
+  principal_signature: string;
+  evidence_uri: string;
+  evidence_hash: string;
+};
+
+export type Delegation = {
+  delegation_id: string;
+  principal_agent_id: string;
+  worker_agent_id: string;
+  platform_id: string;
+  job_id: string;
+  parent_delegation_id: string | null;
+  authority_scope: string;
+  permitted_tools: string[];
+  permitted_actions: string[];
+  spending_limit: number;
+  currency: string;
+  allow_subdelegation: boolean;
+  disclosure_required: boolean;
+  status: string;
+  created_at: string;
+  accepted_at: string | null;
+};
+
+export type ResponsibilityOutcome = "worker_primary" | "delegator_primary" | "shared_responsibility" | "unauthorized_subdelegation" | "tool_failure" | "no_fault" | "inconclusive";
+
+export type LiabilityAllocation = {
+  responsibility_case_id: string;
+  outcome: ResponsibilityOutcome;
+  delegator_responsibility_bps: number;
+  worker_responsibility_bps: number;
+  principal_reputation: ReputationProjection;
+  worker_reputation: ReputationProjection;
+};
+
 export type JudgmentLifecycleEvent = {
   event_id: string;
   event_type: "JUDGMENT_PROVISIONAL" | "APPEAL_SUBMITTED" | "APPEAL_RESOLVED" | "JUDGMENT_UPHELD" | "JUDGMENT_OVERTURNED" | "JUDGMENT_FINALIZED" | "EVENT_SUPERSEDED";
@@ -420,6 +469,38 @@ export class AgentReputationClient {
     return this.request(`/jobs/${encodeURIComponent(jobId)}/appeal/resolve`, "POST", {});
   }
 
+  createDelegation(input: DelegationInput): Promise<{ delegation: Delegation; events: ReputationEvent[] }> {
+    return this.request("/delegations", "POST", input);
+  }
+
+  acceptDelegation(delegationId: string, input: { worker_signature: string; evidence_uri?: string; evidence_hash?: string }) {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/accept`, "POST", input);
+  }
+
+  submitDelegatedOutput(delegationId: string, input: { output_uri: string; summary?: string; evidence_urls?: string[]; evidence_hash: string }) {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/output`, "POST", input);
+  }
+
+  getDelegation(delegationId: string): Promise<{ delegation: Delegation; events: ReputationEvent[] }> {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}`, "GET");
+  }
+
+  disputeDelegatedResponsibility(delegationId: string, input: { claimant_id: string; reason: string; evidence_uri: string; evidence_hash?: string }) {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/responsibility-dispute`, "POST", input);
+  }
+
+  finalizeDelegatedResponsibility(delegationId: string): Promise<LiabilityAllocation> {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/responsibility/finalize`, "POST", {});
+  }
+
+  appealDelegatedResponsibility(delegationId: string, input: { appellant_id: string; reason: string; evidence_uri: string; evidence_hash?: string; bond_amount?: string }) {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/responsibility/appeal`, "POST", input);
+  }
+
+  resolveDelegatedResponsibilityAppeal(delegationId: string): Promise<LiabilityAllocation> {
+    return this.request(`/delegations/${encodeURIComponent(delegationId)}/responsibility/appeal/resolve`, "POST", {});
+  }
+
   createAttestation(input: AttestationInput) {
     return this.request("/attestations", "POST", input);
   }
@@ -433,7 +514,7 @@ export class AgentReputationClient {
   }
 
   getReputation(agentId: string): Promise<Reputation> {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v5`, "GET");
+    return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=research_trust_v6`, "GET");
   }
 
   getAgentEvents(agentId: string, options: { limit?: number } = {}): Promise<{ agent_id: string; events: ReputationEvent[] }> {
@@ -445,7 +526,7 @@ export class AgentReputationClient {
     return this.request(`/events/${encodeURIComponent(eventId)}`, "GET");
   }
 
-  getAgentReputation(agentId: string, projection = "research_trust_v5"): Promise<ReputationProjection> {
+  getAgentReputation(agentId: string, projection = "research_trust_v6"): Promise<ReputationProjection> {
     return this.request(`/agents/${encodeURIComponent(agentId)}/reputation?projection=${encodeURIComponent(projection)}`, "GET");
   }
 

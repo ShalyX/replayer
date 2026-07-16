@@ -116,6 +116,53 @@ class IdentityBindingChallenge(BaseModel):
     evidence_hash: str = ""
 
 
+class DelegationCreate(BaseModel):
+    delegation_id: str | None = None
+    principal_agent_id: str
+    worker_agent_id: str
+    platform_id: str
+    job_id: str
+    parent_delegation_id: str | None = None
+    authority_scope: str = Field(min_length=10, max_length=5000)
+    permitted_tools: list[str] = Field(default_factory=list)
+    permitted_actions: list[str] = Field(default_factory=list)
+    spending_limit: float = Field(default=0, ge=0)
+    currency: str = "USDC"
+    allow_subdelegation: bool = False
+    disclosure_required: bool = True
+    principal_signature: str
+    evidence_uri: str
+    evidence_hash: str
+
+
+class DelegationAccept(BaseModel):
+    worker_signature: str
+    evidence_uri: str = ""
+    evidence_hash: str = ""
+
+
+class DelegatedOutputSubmit(BaseModel):
+    output_uri: str
+    summary: str = ""
+    evidence_urls: list[str] = Field(default_factory=list)
+    evidence_hash: str
+
+
+class ResponsibilityDisputeOpen(BaseModel):
+    claimant_id: str
+    reason: str
+    evidence_uri: str
+    evidence_hash: str = ""
+
+
+class ResponsibilityAppealSubmit(BaseModel):
+    appellant_id: str
+    reason: str
+    evidence_uri: str
+    evidence_hash: str = ""
+    bond_amount: str = ""
+
+
 class ReputationOut(BaseModel):
     agent_id: str
     overall: int

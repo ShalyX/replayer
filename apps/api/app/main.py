@@ -4,6 +4,7 @@ import json
 import secrets
 import threading
 import time
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
@@ -17,11 +18,12 @@ from .genlayer import GenLayerClient
 from .indexer import GenLayerEventIndexer
 from .identity import binding_message, normalize_identity, registration_message, verify_identity_signature
 from .ledger import append_event, event_dict, identity_projection_dict, projection_dict, rebuild_all_identity_projections, rebuild_all_projections, rebuild_identity_projection, rebuild_platform_credibility, rebuild_projection
-from .models import Agent, AgentIdentityProjection, AgentReputationProjection, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
+from .models import Agent, AgentIdentityProjection, AgentReputationProjection, Delegation, Deliverable, DemoRun, Dispute, Job, Judgment, Platform, PlatformCredibilityProjection, ReputationEvent, new_id
 from .schemas import (
     AgentIdentityRegister, AgentRegister, AppealSubmit, AttestationConfirm, AttestationCreate, DeliverableSubmit,
-    DisputeOpen, EventChallenge, IdentityBindingChallenge, IdentityBindingConfirm, IdentityBindingPropose,
-    JobCreate, PlatformIdentityVerify, PlatformRegister, TrustEvaluateRequest,
+    DelegatedOutputSubmit, DelegationAccept, DelegationCreate, DisputeOpen, EventChallenge,
+    IdentityBindingChallenge, IdentityBindingConfirm, IdentityBindingPropose, JobCreate, PlatformIdentityVerify,
+    PlatformRegister, ResponsibilityAppealSubmit, ResponsibilityDisputeOpen, TrustEvaluateRequest,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -146,7 +148,7 @@ def read_identity_projection(db: Session, agent_id: str) -> AgentIdentityProject
 
 
 def read_reputation_projection(
-    db: Session, agent_id: str, projection: str = "research_trust_v5"
+    db: Session, agent_id: str, projection: str = "research_trust_v6"
 ) -> AgentReputationProjection:
     projection_name, projection_version = projection.rsplit("_", 1)
     stored = db.scalars(select(AgentReputationProjection).where(
@@ -614,7 +616,7 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
     )
     provisional = genlayer.call_json("get_event", [provisional_event_id])
     if not (isinstance(provisional, dict) and provisional.get("metadata")):
-        rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
+        rebuild_projection(db, job.provider_agent_id, "research_trust_v6")
         db.commit()
         db.refresh(dispute)
         return JSONResponse(status_code=202, content={
@@ -633,7 +635,7 @@ def open_dispute(job_id: str, payload: DisputeOpen, db: Session = Depends(get_db
         references=provisional.get("references", []),
         metadata={**provisional["metadata"], "contract_readback_verified": True},
     )
-    rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
+    rebuild_projection(db, job.provider_agent_id, "research_trust_v6")
     db.commit()
     db.refresh(dispute)
     return {"dispute": dispute_to_dict(dispute), "tx": tx}
@@ -672,7 +674,7 @@ def appeal_job(job_id: str, payload: AppealSubmit, db: Session = Depends(get_db)
     appeal_event_id = contract_event_id("appeal", dispute.id)
     if db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == appeal_event_id)).first():
         raise HTTPException(status_code=409, detail="An appeal has already been submitted")
-    provisional_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v5"))
+    provisional_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v6"))
     try:
         protocol = genlayer.appeal_transaction(provisional.transaction_hash, payload.bond_amount)
     except (RuntimeError, ValueError) as exc:
@@ -695,7 +697,7 @@ def appeal_job(job_id: str, payload: AppealSubmit, db: Session = Depends(get_db)
     )
     dispute.status = "appealed"
     job.status = "appeal_pending"
-    appealed_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v5"))
+    appealed_reputation = projection_dict(rebuild_projection(db, job.provider_agent_id, "research_trust_v6"))
     db.commit()
     return {"appeal": event_dict(db, event), "protocol": protocol,
             "provisional_reputation": provisional_reputation,
@@ -771,7 +773,7 @@ def resolve_job_appeal(job_id: str, db: Session = Depends(get_db), auth: dict = 
     judgment.verify_url = genlayer.verify_url(protocol_tx)
     dispute.status = "resolved"
     job.status = f"judged_{verdict}"
-    projection = rebuild_projection(db, job.provider_agent_id, "research_trust_v5")
+    projection = rebuild_projection(db, job.provider_agent_id, "research_trust_v6")
     db.commit()
     outcome = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == outcome_event_id)).first()
     return {"judgment": judgment_to_dict(judgment), "outcome": event_dict(db, outcome),
@@ -867,6 +869,262 @@ def evaluate_job(job_id: str, db: Session = Depends(get_db), auth: dict = Depend
             "event": event_dict(db, judgment_event)}
 
 
+@app.post("/delegations")
+def create_delegation(payload: DelegationCreate, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    authorize_platform(auth, payload.platform_id)
+    principal = db.get(Agent, payload.principal_agent_id)
+    worker = db.get(Agent, payload.worker_agent_id)
+    job = require_job(db, payload.job_id)
+    if not principal or not worker:
+        raise HTTPException(status_code=404, detail="Principal or worker agent not found")
+    if principal.id == worker.id:
+        raise HTTPException(status_code=409, detail="An agent cannot delegate work to itself")
+    if job.platform_id != payload.platform_id or job.provider_agent_id != principal.id:
+        raise HTTPException(status_code=409, detail="Delegation principal must be the job provider")
+    parent = db.get(Delegation, payload.parent_delegation_id) if payload.parent_delegation_id else None
+    if payload.parent_delegation_id and not parent:
+        raise HTTPException(status_code=404, detail="Parent delegation not found")
+    if parent and (not parent.allow_subdelegation or parent.worker_agent_id != principal.id):
+        raise HTTPException(status_code=409, detail="Parent delegation does not authorize this subdelegation")
+    delegation_id = payload.delegation_id or new_id("delegation")
+    if db.get(Delegation, delegation_id):
+        raise HTTPException(status_code=409, detail="Delegation already exists")
+    delegation = Delegation(
+        id=delegation_id, principal_agent_id=principal.id, worker_agent_id=worker.id,
+        platform_id=payload.platform_id, job_id=job.id, parent_delegation_id=payload.parent_delegation_id,
+        authority_scope=payload.authority_scope, permitted_tools=payload.permitted_tools,
+        permitted_actions=payload.permitted_actions, spending_limit=payload.spending_limit,
+        currency=payload.currency, allow_subdelegation=payload.allow_subdelegation,
+        disclosure_required=payload.disclosure_required, principal_signature=payload.principal_signature,
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+    )
+    db.add(delegation)
+    db.flush()
+    shared = {
+        "principal_agent_id": principal.id, "worker_agent_id": worker.id,
+        "authority_scope": payload.authority_scope, "permitted_tools": payload.permitted_tools,
+        "permitted_actions": payload.permitted_actions, "allow_subdelegation": payload.allow_subdelegation,
+        "disclosure_required": payload.disclosure_required, "principal_signature": payload.principal_signature,
+        "identity_bindings": [principal.owner_wallet, worker.owner_wallet],
+    }
+    created_id = contract_event_id("delegation_created", delegation.id)
+    created, created_tx = append_delegation_event(
+        db, delegation, "DELEGATION_CREATED", event_id=created_id, actor_agent_id=principal.id,
+        counterparty_id=worker.id, evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        references=[], metadata=shared,
+    )
+    scope_id = contract_event_id("authority_scope_granted", delegation.id)
+    scope, _ = append_delegation_event(
+        db, delegation, "AUTHORITY_SCOPE_GRANTED", event_id=scope_id, actor_agent_id=principal.id,
+        counterparty_id=worker.id, evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        references=[created_id], metadata=shared,
+    )
+    spending_id = contract_event_id("spending_limit_set", delegation.id)
+    spending, _ = append_delegation_event(
+        db, delegation, "SPENDING_LIMIT_SET", event_id=spending_id, actor_agent_id=principal.id,
+        counterparty_id=worker.id, evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        references=[scope_id], metadata={**shared, "spending_limit": payload.spending_limit, "currency": payload.currency},
+    )
+    events = [created, scope, spending]
+    if parent:
+        subdelegated, _ = append_delegation_event(
+            db, delegation, "WORK_SUBDELEGATED",
+            event_id=contract_event_id("work_subdelegated", delegation.id), actor_agent_id=principal.id,
+            counterparty_id=worker.id, evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+            references=[contract_event_id("delegation_accepted", parent.id), created_id],
+            metadata={**shared, "parent_delegation_id": parent.id},
+        )
+        events.append(subdelegated)
+    db.commit()
+    return {"delegation": delegation_to_dict(delegation), "events": [event_dict(db, event) for event in events], "tx": created_tx}
+
+
+@app.post("/delegations/{delegation_id}/accept")
+def accept_delegation(delegation_id: str, payload: DelegationAccept, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    if delegation.status != "created":
+        raise HTTPException(status_code=409, detail="Delegation is not awaiting acceptance")
+    event, tx = append_delegation_event(
+        db, delegation, "DELEGATION_ACCEPTED", event_id=contract_event_id("delegation_accepted", delegation.id),
+        actor_agent_id=delegation.worker_agent_id, counterparty_id=delegation.principal_agent_id,
+        evidence_uri=payload.evidence_uri or delegation.evidence_uri,
+        evidence_hash=payload.evidence_hash or delegation.evidence_hash,
+        references=[contract_event_id("delegation_created", delegation.id)],
+        metadata={"worker_signature": payload.worker_signature},
+    )
+    delegation.worker_signature = payload.worker_signature
+    delegation.status = "accepted"
+    delegation.accepted_at = datetime.utcnow()
+    db.commit()
+    return {"delegation": delegation_to_dict(delegation), "event": event_dict(db, event), "tx": tx}
+
+
+@app.post("/delegations/{delegation_id}/output")
+def submit_delegated_output(delegation_id: str, payload: DelegatedOutputSubmit, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    if delegation.status != "accepted":
+        raise HTTPException(status_code=409, detail="Delegation must be accepted before output submission")
+    event_id = contract_event_id("delegated_output_submitted", delegation.id)
+    event, tx = append_delegation_event(
+        db, delegation, "DELEGATED_OUTPUT_SUBMITTED", event_id=event_id,
+        actor_agent_id=delegation.worker_agent_id, counterparty_id=delegation.principal_agent_id,
+        evidence_uri=payload.output_uri, evidence_hash=payload.evidence_hash,
+        references=[contract_event_id("delegation_accepted", delegation.id)],
+        metadata={"output_uri": payload.output_uri, "summary": payload.summary, "evidence_urls": payload.evidence_urls},
+    )
+    delegation.status = "output_submitted"
+    db.commit()
+    return {"delegation": delegation_to_dict(delegation), "event": event_dict(db, event), "tx": tx}
+
+
+@app.get("/delegations/{delegation_id}")
+def get_delegation(delegation_id: str, db: Session = Depends(get_db)) -> dict:
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.job_id == delegation.job_id
+    ).order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)).all()
+    events = [event for event in events if event.event_metadata.get("delegation_id") == delegation.id]
+    return {"delegation": delegation_to_dict(delegation), "events": [event_dict(db, event) for event in events]}
+
+
+@app.post("/delegations/{delegation_id}/responsibility-dispute", response_model=None)
+def dispute_delegated_responsibility(delegation_id: str, payload: ResponsibilityDisputeOpen, db: Session = Depends(get_db), auth: dict = Depends(get_auth)):
+    acquire_ledger_write_lock(db)
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    if delegation.status != "output_submitted":
+        raise HTTPException(status_code=409, detail="Delegated output must be submitted before responsibility is disputed")
+    case_id = new_id("responsibility")
+    ids = responsibility_event_ids(case_id)
+    output = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == contract_event_id("delegated_output_submitted", delegation.id)
+    )).first()
+    job = require_job(db, delegation.job_id)
+    contract_payload = {
+        "responsibility_case_id": case_id, "delegation_id": delegation.id,
+        "principal_agent_id": delegation.principal_agent_id, "worker_agent_id": delegation.worker_agent_id,
+        "platform_id": delegation.platform_id, "job_id": delegation.job_id, "category": job.category,
+        "authority_scope": delegation.authority_scope, "permitted_tools": delegation.permitted_tools,
+        "permitted_actions": delegation.permitted_actions, "spending_limit": float(delegation.spending_limit or 0),
+        "currency": delegation.currency, "allow_subdelegation": delegation.allow_subdelegation,
+        "disclosure_required": delegation.disclosure_required,
+        "principal_signature": delegation.principal_signature, "worker_signature": delegation.worker_signature,
+        "task_spec": job.task_spec, "delegated_output": output.event_metadata if output else {},
+        "claimant_id": payload.claimant_id, "reason": payload.reason,
+        "evidence_uri": payload.evidence_uri, "evidence_hash": payload.evidence_hash,
+        "dispute_event_id": ids["dispute"], "principal_provisional_event_id": ids["principal_provisional"],
+        "worker_provisional_event_id": ids["worker_provisional"],
+    }
+    tx = genlayer.write("evaluate_responsibility", [json.dumps(contract_payload, sort_keys=True)])
+    opened = append_event(
+        db, event_id=ids["dispute"], event_type="RESPONSIBILITY_DISPUTED",
+        agent_id=delegation.principal_agent_id, platform_id=delegation.platform_id,
+        job_id=delegation.job_id, dispute_id=case_id, counterparty_id=delegation.worker_agent_id,
+        category=job.category, provenance="platform_reported", verification_status="pending",
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        transaction_hash=tx.get("tx_id") or None,
+        metadata={"delegation_id": delegation.id, "reason": payload.reason,
+                  "event_ids": ids, "contract_readback_verified": False},
+    )
+    provisional_events = []
+    for role in ["principal", "worker"]:
+        event_id = ids[role + "_provisional"]
+        contract_event = genlayer.call_json("get_event", [event_id])
+        if not isinstance(contract_event, dict) or not contract_event.get("metadata"):
+            continue
+        provisional_events.append(append_event(
+            db, event_id=event_id, event_type="RESPONSIBILITY_JUDGMENT_PROVISIONAL",
+            agent_id=contract_event["agent_id"], platform_id=delegation.platform_id,
+            job_id=delegation.job_id, dispute_id=case_id, counterparty_id=contract_event.get("counterparty_id"),
+            category=job.category, provenance="genlayer_provisional", verification_status="provisional",
+            evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+            references=contract_event.get("references", []), contract_address=genlayer.contract_address,
+            transaction_hash=tx.get("tx_id") or None,
+            metadata={**contract_event["metadata"], "contract_readback_verified": True},
+        ))
+    if len(provisional_events) == 2:
+        opened.contract_address = genlayer.contract_address
+        opened.event_metadata = {**opened.event_metadata, "contract_readback_verified": True}
+    delegation.status = "responsibility_disputed"
+    principal_projection = rebuild_projection(db, delegation.principal_agent_id, "research_trust_v6")
+    worker_projection = rebuild_projection(db, delegation.worker_agent_id, "research_trust_v6")
+    db.commit()
+    response = {"responsibility_case_id": case_id, "event": event_dict(db, opened), "tx": tx,
+                "provisional_events": [event_dict(db, event) for event in provisional_events],
+                "principal_reputation": projection_dict(principal_projection),
+                "worker_reputation": projection_dict(worker_projection)}
+    return response if len(provisional_events) == 2 else JSONResponse(status_code=202, content=response)
+
+
+@app.post("/delegations/{delegation_id}/responsibility/finalize")
+def finalize_delegated_responsibility(delegation_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    return resolve_responsibility_case(db, delegation, appealed=False)
+
+
+@app.post("/delegations/{delegation_id}/responsibility/appeal")
+def appeal_delegated_responsibility(delegation_id: str, payload: ResponsibilityAppealSubmit, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    acquire_ledger_write_lock(db)
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    opened = responsibility_open_event(db, delegation)
+    if not opened or not opened.transaction_hash:
+        raise HTTPException(status_code=409, detail="Responsibility judgment has not been submitted")
+    ids = opened.event_metadata["event_ids"]
+    if db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == ids["appeal"])).first():
+        raise HTTPException(status_code=409, detail="Responsibility judgment has already been appealed")
+    try:
+        protocol = genlayer.appeal_transaction(opened.transaction_hash, payload.bond_amount)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=clean_runtime_error(str(exc))) from exc
+    event = append_event(
+        db, event_id=ids["appeal"], event_type="RESPONSIBILITY_APPEALED",
+        agent_id=delegation.principal_agent_id, platform_id=delegation.platform_id,
+        job_id=delegation.job_id, dispute_id=opened.dispute_id, counterparty_id=delegation.worker_agent_id,
+        category="research", provenance="challenged", verification_status="appealed",
+        evidence_uri=payload.evidence_uri, evidence_hash=payload.evidence_hash,
+        references=[ids["principal_provisional"], ids["worker_provisional"]],
+        transaction_hash=protocol.get("appeal_submission_hash") or opened.transaction_hash,
+        metadata={"delegation_id": delegation.id, "responsibility_case_id": opened.dispute_id,
+                  "reason": payload.reason, "appellant_id": payload.appellant_id,
+                  "bond_amount": payload.bond_amount, "protocol_transaction_hash": opened.transaction_hash,
+                  "protocol_round": int(protocol.get("round", 1))},
+    )
+    delegation.status = "responsibility_appealed"
+    principal = rebuild_projection(db, delegation.principal_agent_id, "research_trust_v6")
+    worker = rebuild_projection(db, delegation.worker_agent_id, "research_trust_v6")
+    db.commit()
+    return {"appeal": event_dict(db, event), "protocol": protocol,
+            "principal_reputation": projection_dict(principal), "worker_reputation": projection_dict(worker)}
+
+
+@app.post("/delegations/{delegation_id}/responsibility/appeal/resolve")
+def resolve_delegated_responsibility_appeal(delegation_id: str, db: Session = Depends(get_db), auth: dict = Depends(get_auth)) -> dict:
+    delegation = db.get(Delegation, delegation_id)
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Delegation not found")
+    authorize_platform(auth, delegation.platform_id)
+    return resolve_responsibility_case(db, delegation, appealed=True)
+
+
 def registered_identity_event(db: Session, agent_id: str, identity: str) -> ReputationEvent | None:
     normalized = normalize_identity(identity)
     events = db.scalars(select(ReputationEvent).where(
@@ -922,7 +1180,7 @@ def register_agent_identity(agent_id: str, payload: AgentIdentityRegister, db: S
         metadata={**metadata, "contract_readback_verified": True},
     )
     projection = rebuild_identity_projection(db, agent_id)
-    reputation = rebuild_projection(db, agent_id, "research_trust_v5")
+    reputation = rebuild_projection(db, agent_id, "research_trust_v6")
     db.commit()
     return {"event": event_dict(db, event), "identity": identity_projection_dict(projection),
             "reputation": projection_dict(reputation), "tx": tx}
@@ -1022,8 +1280,8 @@ def confirm_identity_binding(proposal_event_id: str, payload: IdentityBindingCon
         raise RuntimeError("GenLayer identity link was not indexed")
     rebuild_all_identity_projections(db)
     source_identity = rebuild_identity_projection(db, source.id)
-    source_reputation = rebuild_projection(db, source.id, "research_trust_v5")
-    rebuild_projection(db, target.id, "research_trust_v5")
+    source_reputation = rebuild_projection(db, source.id, "research_trust_v6")
+    rebuild_projection(db, target.id, "research_trust_v6")
     db.commit()
     return {"link": event_dict(db, link), "identity": identity_projection_dict(source_identity),
             "reputation": projection_dict(source_reputation), "tx": tx}
@@ -1211,10 +1469,10 @@ def challenge_attestation(event_id: str, payload: EventChallenge, db: Session = 
 
 
 @app.get("/agents/{agent_id}/reputation")
-def get_reputation(agent_id: str, projection: str = "research_trust_v5", db: Session = Depends(get_db)) -> dict:
+def get_reputation(agent_id: str, projection: str = "research_trust_v6", db: Session = Depends(get_db)) -> dict:
     if not db.get(Agent, agent_id):
         raise HTTPException(status_code=404, detail="Unknown agent")
-    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4", "research_trust_v5"}:
+    if projection not in {"research_trust_v1", "research_trust_v2", "research_trust_v3", "research_trust_v4", "research_trust_v5", "research_trust_v6"}:
         raise HTTPException(status_code=400, detail="Unsupported projection")
     result = read_reputation_projection(db, agent_id, projection)
     db.commit()
@@ -1303,7 +1561,7 @@ def rebuild_projections(db: Session = Depends(get_db)) -> dict:
     identity_count = db.scalar(select(func.count()).select_from(AgentIdentityProjection)) or 0
     return {"rebuilt": len(projections) + identity_count,
             "projections": ["research_trust_v1", "research_trust_v2", "research_trust_v3",
-                            "research_trust_v4", "research_trust_v5", "platform_credibility_v1", "agent_identity_v1"]}
+                            "research_trust_v4", "research_trust_v5", "research_trust_v6", "platform_credibility_v1", "agent_identity_v1"]}
 
 
 @app.post("/trust/evaluate", dependencies=[Depends(require_key)])
@@ -1312,16 +1570,11 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
     if not agent:
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v5")
+    reputation = rebuild_projection(db, payload.agent_id, "research_trust_v6")
     judgments = db.scalars(select(Judgment).join(Job).where(Job.provider_agent_id == payload.agent_id)).all()
     fraud_judgments = [judgment for judgment in judgments if judgment.verdict == "fraudulent"]
     fraud_incidents = reputation.fraud_incidents
-    risk_score = min(
-        100,
-        reputation.risk_score
-        + fraud_incidents * 45
-        + (10 if reputation.status == "flagged" else 0),
-    )
+    risk_score = reputation.risk_score
 
     reasons = []
     if fraud_incidents:
@@ -1395,7 +1648,7 @@ def evaluate_trust(payload: TrustEvaluateRequest, db: Session = Depends(get_db))
             db,
             payload.agent_id,
             policy_event={
-                "platform": "EnterpriseAgents.io",
+                "platform": "Requesting marketplace",
                 "title": f"Policy check: {policy_outcome}",
                 "detail": policy_reasons[0] if policy_reasons else "Agent satisfies this marketplace policy.",
                 "severity": "danger" if not eligible else "success",
@@ -1665,6 +1918,152 @@ def write_contract_json(method: str, payload: dict, expected_event_id: str) -> d
             return tx
         time.sleep(settings.genlayer_read_interval_seconds)
     raise RuntimeError(f"GenLayer transaction {tx.get('tx_id', '')} did not expose event {expected_event_id}")
+
+
+def delegation_to_dict(delegation: Delegation) -> dict:
+    return {
+        "delegation_id": delegation.id,
+        "principal_agent_id": delegation.principal_agent_id,
+        "worker_agent_id": delegation.worker_agent_id,
+        "platform_id": delegation.platform_id,
+        "job_id": delegation.job_id,
+        "parent_delegation_id": delegation.parent_delegation_id,
+        "authority_scope": delegation.authority_scope,
+        "permitted_tools": delegation.permitted_tools,
+        "permitted_actions": delegation.permitted_actions,
+        "spending_limit": float(delegation.spending_limit or 0),
+        "currency": delegation.currency,
+        "allow_subdelegation": delegation.allow_subdelegation,
+        "disclosure_required": delegation.disclosure_required,
+        "evidence_uri": delegation.evidence_uri,
+        "evidence_hash": delegation.evidence_hash,
+        "status": delegation.status,
+        "created_at": delegation.created_at.isoformat(),
+        "accepted_at": delegation.accepted_at.isoformat() if delegation.accepted_at else None,
+    }
+
+
+def append_delegation_event(
+    db: Session,
+    delegation: Delegation,
+    event_type: str,
+    *,
+    event_id: str,
+    actor_agent_id: str,
+    counterparty_id: str,
+    evidence_uri: str,
+    evidence_hash: str,
+    references: list[str],
+    metadata: dict,
+) -> tuple[ReputationEvent, dict]:
+    payload = {
+        "event_id": event_id, "event_type": event_type, "agent_id": actor_agent_id,
+        "platform_id": delegation.platform_id, "job_id": delegation.job_id,
+        "dispute_id": "", "counterparty_id": counterparty_id, "category": "research",
+        "evidence_uri": evidence_uri, "evidence_hash": evidence_hash,
+        "references": references, "metadata": {"delegation_id": delegation.id, **metadata},
+    }
+    tx = write_contract_json("append_platform_event", payload, event_id)
+    event = append_event(
+        db, event_id=event_id, event_type=event_type, agent_id=actor_agent_id,
+        platform_id=delegation.platform_id, job_id=delegation.job_id,
+        counterparty_id=counterparty_id, category="research", provenance="platform_reported",
+        verification_status="finalized", evidence_uri=evidence_uri, evidence_hash=evidence_hash,
+        references=references, contract_address=genlayer.contract_address,
+        transaction_hash=tx.get("tx_id") or None,
+        metadata={"delegation_id": delegation.id, **metadata, "contract_readback_verified": True},
+    )
+    return event, tx
+
+
+def responsibility_event_ids(case_id: str) -> dict[str, str]:
+    return {
+        "dispute": contract_event_id("responsibility_disputed", case_id),
+        "principal_provisional": contract_event_id("responsibility_principal_provisional", case_id),
+        "worker_provisional": contract_event_id("responsibility_worker_provisional", case_id),
+        "appeal": contract_event_id("responsibility_appealed", case_id),
+        "principal_final": contract_event_id("responsibility_principal_final", case_id),
+        "worker_final": contract_event_id("responsibility_worker_final", case_id),
+        "principal_liability": contract_event_id("liability_principal", case_id),
+        "worker_liability": contract_event_id("liability_worker", case_id),
+    }
+
+
+def responsibility_open_event(db: Session, delegation: Delegation) -> ReputationEvent | None:
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.job_id == delegation.job_id,
+        ReputationEvent.event_type == "RESPONSIBILITY_DISPUTED",
+    ).order_by(ReputationEvent.occurred_at.desc())).all()
+    return next((event for event in events if event.event_metadata.get("delegation_id") == delegation.id), None)
+
+
+def resolve_responsibility_case(db: Session, delegation: Delegation, *, appealed: bool) -> dict:
+    acquire_ledger_write_lock(db)
+    opened = responsibility_open_event(db, delegation)
+    if not opened or not opened.transaction_hash or not opened.dispute_id:
+        raise HTTPException(status_code=409, detail="Responsibility judgment has not been submitted")
+    ids = opened.event_metadata.get("event_ids") or responsibility_event_ids(opened.dispute_id)
+    existing = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.event_id == ids["principal_liability"]
+    )).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Responsibility judgment is already finalized")
+    appeal = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == ids["appeal"])).first()
+    if appealed and not appeal:
+        raise HTTPException(status_code=409, detail="Responsibility appeal has not been submitted")
+    if not appealed and appeal:
+        raise HTTPException(status_code=409, detail="Appealed responsibility must use the appeal resolution endpoint")
+    protocol = genlayer.transaction_status(opened.transaction_hash)
+    if protocol["status"] == "READY_TO_FINALIZE":
+        protocol = genlayer.finalize_transaction(opened.transaction_hash)
+    if protocol["status"] != "FINALIZED":
+        raise HTTPException(status_code=409, detail=f"GenLayer responsibility judgment is not final: {protocol['status']}")
+    current = genlayer.call_json("get_responsibility_case", [opened.dispute_id])
+    if not isinstance(current, dict) or not current.get("outcome"):
+        raise RuntimeError("Final GenLayer responsibility judgment could not be read from contract state")
+    payload = {
+        "responsibility_case_id": opened.dispute_id,
+        "principal_provisional_event_id": ids["principal_provisional"],
+        "worker_provisional_event_id": ids["worker_provisional"],
+        "appealed": appealed, "appeal_event_id": ids["appeal"],
+        "appeal_reason": str((appeal.event_metadata if appeal else {}).get("reason", "")),
+        "evidence_uri": appeal.evidence_uri if appeal else opened.evidence_uri or "",
+        "evidence_hash": appeal.evidence_hash if appeal else opened.evidence_hash or "",
+        "protocol_transaction_hash": opened.transaction_hash,
+        "protocol_round": int(protocol.get("round", 0)),
+        "principal_final_event_id": ids["principal_final"],
+        "worker_final_event_id": ids["worker_final"],
+        "principal_liability_event_id": ids["principal_liability"],
+        "worker_liability_event_id": ids["worker_liability"],
+    }
+    ledger_tx = write_contract_json("finalize_responsibility", payload, ids["principal_liability"])
+    indexer.sync_once(db)
+    final_events = {}
+    for key in ["principal_final", "worker_final", "principal_liability", "worker_liability"]:
+        event = db.scalars(select(ReputationEvent).where(ReputationEvent.event_id == ids[key])).first()
+        if not event:
+            raise RuntimeError(f"Final responsibility event {ids[key]} was not indexed")
+        event.transaction_hash = opened.transaction_hash
+        event.contract_address = genlayer.contract_address
+        event.event_metadata = {
+            **event.event_metadata, "contract_readback_verified": True,
+            "ledger_record_transaction_hash": ledger_tx.get("tx_id") or "",
+        }
+        final_events[key] = event
+    delegation.status = "responsibility_finalized"
+    principal = rebuild_projection(db, delegation.principal_agent_id, "research_trust_v6")
+    worker = rebuild_projection(db, delegation.worker_agent_id, "research_trust_v6")
+    db.commit()
+    return {
+        "responsibility_case_id": opened.dispute_id,
+        "outcome": current.get("outcome"),
+        "delegator_responsibility_bps": int(current.get("delegator_responsibility_bps", 0)),
+        "worker_responsibility_bps": int(current.get("worker_responsibility_bps", 0)),
+        "events": {key: event_dict(db, event) for key, event in final_events.items()},
+        "principal_reputation": projection_dict(principal),
+        "worker_reputation": projection_dict(worker),
+        "protocol": protocol, "ledger_tx": ledger_tx,
+    }
 
 
 def platform_to_dict(platform: Platform) -> dict:

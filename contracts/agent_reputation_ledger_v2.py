@@ -10,6 +10,7 @@ class ReputationEventLedger(gl.Contract):
     ledger_metadata: TreeMap[str, str]
     disputes: TreeMap[str, str]
     judgments: TreeMap[str, str]
+    responsibility_cases: TreeMap[str, str]
 
     def __init__(self):
         pass
@@ -17,7 +18,7 @@ class ReputationEventLedger(gl.Contract):
     @gl.public.write
     def append_platform_event(self, event_json: str) -> None:
         event = self._object(event_json)
-        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED", "PLATFORM_IDENTITY_VERIFIED", "AGENT_IDENTITY_REGISTERED", "IDENTITY_BINDING_PROPOSED", "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED", "IDENTITY_UNLINKED"]
+        allowed = ["AGENT_REGISTERED", "JOB_CREATED", "DELIVERABLE_SUBMITTED", "JOB_ACCEPTED", "JOB_COMPLETED", "EVENT_ATTESTED", "REPUTATION_ATTESTED", "PLATFORM_IDENTITY_VERIFIED", "AGENT_IDENTITY_REGISTERED", "IDENTITY_BINDING_PROPOSED", "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED", "IDENTITY_UNLINKED", "DELEGATION_CREATED", "DELEGATION_ACCEPTED", "AUTHORITY_SCOPE_GRANTED", "SPENDING_LIMIT_SET", "WORK_SUBDELEGATED", "DELEGATED_OUTPUT_SUBMITTED"]
         if str(event.get("event_type", "")) not in allowed:
             raise gl.vm.UserError("[EXPECTED] Unsupported platform event")
         event["provenance"] = "platform_reported"
@@ -478,6 +479,183 @@ class ReputationEventLedger(gl.Contract):
         event["provenance"] = "genlayer_verified"
         event["verification_status"] = "finalized"
         self._append(event)
+
+    @gl.public.write
+    def evaluate_responsibility(self, case_json: str) -> None:
+        case = self._object(case_json)
+        case_id = str(case["responsibility_case_id"])
+        if case_id in self.responsibility_cases:
+            raise gl.vm.UserError("[EXPECTED] Responsibility case already exists")
+        case_payload = json.dumps(case, sort_keys=True)
+
+        self._append({
+            "event_id": str(case["dispute_event_id"]),
+            "event_type": "RESPONSIBILITY_DISPUTED",
+            "agent_id": str(case["principal_agent_id"]),
+            "platform_id": str(case["platform_id"]),
+            "job_id": str(case["job_id"]),
+            "dispute_id": case_id,
+            "counterparty_id": str(case["worker_agent_id"]),
+            "category": str(case.get("category", "research")),
+            "provenance": "platform_reported",
+            "verification_status": "pending",
+            "evidence_uri": str(case.get("evidence_uri", "")),
+            "evidence_hash": str(case.get("evidence_hash", "")),
+            "metadata": {"delegation_id": str(case["delegation_id"]), "reason": str(case.get("reason", ""))},
+        })
+
+        def evaluate() -> str:
+            prompt = (
+                "Attribute responsibility for this delegated AI-agent failure. Inspect the signed authority scope, "
+                "subdelegation permission, disclosure requirement, prior warnings, review duty, output, and evidence. "
+                "Do not split liability automatically. Return only JSON with outcome (worker_primary, delegator_primary, "
+                "shared_responsibility, unauthorized_subdelegation, tool_failure, no_fault, or inconclusive), "
+                "delegator_responsibility_bps, worker_responsibility_bps, impact_kind, confidence_bps, and reasoning_summary. "
+                "For accountable outcomes the two responsibility values must total 10000. For tool_failure, no_fault, or "
+                "inconclusive both must be zero.\n\n" + case_payload
+            )
+            raw = gl.nondet.exec_prompt(prompt, response_format="json")
+            parsed = json.loads(raw.replace("```json", "").replace("```", "")) if isinstance(raw, str) else raw
+            outcome = str(parsed.get("outcome", "inconclusive")).lower()
+            allowed = ["worker_primary", "delegator_primary", "shared_responsibility", "unauthorized_subdelegation", "tool_failure", "no_fault", "inconclusive"]
+            if outcome not in allowed:
+                outcome = "inconclusive"
+            delegator_bps = max(0, min(10000, int(parsed.get("delegator_responsibility_bps", 0))))
+            worker_bps = max(0, min(10000, int(parsed.get("worker_responsibility_bps", 0))))
+            if outcome in ["tool_failure", "no_fault", "inconclusive"]:
+                delegator_bps = 0
+                worker_bps = 0
+            elif delegator_bps + worker_bps != 10000:
+                delegator_bps = 5000
+                worker_bps = 5000
+            if outcome == "worker_primary" and worker_bps <= delegator_bps:
+                delegator_bps, worker_bps = 2000, 8000
+            if outcome == "delegator_primary" and delegator_bps <= worker_bps:
+                delegator_bps, worker_bps = 8000, 2000
+            return json.dumps({
+                "outcome": outcome,
+                "delegator_responsibility_bps": delegator_bps,
+                "worker_responsibility_bps": worker_bps,
+                "impact_kind": str(parsed.get("impact_kind", "delivery_failure"))[:80],
+                "confidence_bps": max(0, min(10000, int(parsed.get("confidence_bps", 0)))),
+                "reasoning_summary": str(parsed.get("reasoning_summary", ""))[:1200],
+            }, sort_keys=True)
+
+        judgment = json.loads(gl.eq_principle.prompt_comparative(
+            evaluate,
+            principle=(
+                "The outcome must match exactly. Delegator and worker responsibility allocations may each differ by at "
+                "most 1000 basis points and must obey the outcome constraints. Reasoning must identify materially the "
+                "same authority, disclosure, review, subdelegation, or tool-failure facts."
+            ),
+        ))
+        judgment.update({
+            "responsibility_case_id": case_id,
+            "delegation_id": str(case["delegation_id"]),
+            "principal_agent_id": str(case["principal_agent_id"]),
+            "worker_agent_id": str(case["worker_agent_id"]),
+            "platform_id": str(case["platform_id"]),
+            "job_id": str(case["job_id"]),
+            "status": "provisional",
+            "appeal_state": "open",
+        })
+        self.responsibility_cases[case_id] = json.dumps(judgment, sort_keys=True)
+        for role in ["principal", "worker"]:
+            agent_id = judgment["principal_agent_id"] if role == "principal" else judgment["worker_agent_id"]
+            bps = judgment["delegator_responsibility_bps"] if role == "principal" else judgment["worker_responsibility_bps"]
+            metadata = {**judgment, "role": "delegator" if role == "principal" else "worker", "responsibility_bps": bps}
+            self._append({
+                "event_id": str(case[role + "_provisional_event_id"]),
+                "event_type": "RESPONSIBILITY_JUDGMENT_PROVISIONAL",
+                "agent_id": agent_id,
+                "platform_id": judgment["platform_id"],
+                "job_id": judgment["job_id"],
+                "dispute_id": case_id,
+                "counterparty_id": judgment["worker_agent_id"] if role == "principal" else judgment["principal_agent_id"],
+                "category": str(case.get("category", "research")),
+                "provenance": "genlayer_provisional",
+                "verification_status": "provisional",
+                "evidence_uri": str(case.get("evidence_uri", "")),
+                "evidence_hash": str(case.get("evidence_hash", "")),
+                "references": [str(case["dispute_event_id"])],
+                "metadata": metadata,
+            })
+
+    @gl.public.write
+    def finalize_responsibility(self, resolution_json: str) -> None:
+        resolution = self._object(resolution_json)
+        case_id = str(resolution["responsibility_case_id"])
+        if case_id not in self.responsibility_cases:
+            raise gl.vm.UserError("[EXPECTED] Unknown responsibility case")
+        judgment = json.loads(self.responsibility_cases[case_id])
+        if str(judgment.get("status", "")) not in ["provisional", "appealed"]:
+            raise gl.vm.UserError("[EXPECTED] Responsibility judgment is not finalizable")
+        appealed = bool(resolution.get("appealed", False))
+        references = [str(resolution["principal_provisional_event_id"]), str(resolution["worker_provisional_event_id"])]
+        if appealed:
+            appeal_event_id = str(resolution["appeal_event_id"])
+            self._append({
+                "event_id": appeal_event_id,
+                "event_type": "RESPONSIBILITY_APPEALED",
+                "agent_id": judgment["principal_agent_id"],
+                "platform_id": judgment["platform_id"],
+                "job_id": judgment["job_id"],
+                "dispute_id": case_id,
+                "counterparty_id": judgment["worker_agent_id"],
+                "category": "research",
+                "provenance": "challenged",
+                "verification_status": "appealed",
+                "references": references,
+                "evidence_uri": str(resolution.get("evidence_uri", "")),
+                "evidence_hash": str(resolution.get("evidence_hash", "")),
+                "metadata": {**judgment, "reason": str(resolution.get("appeal_reason", ""))},
+            })
+            references.append(appeal_event_id)
+        judgment["status"] = "finalized"
+        judgment["appeal_state"] = "resolved" if appealed else "closed"
+        judgment["protocol_transaction_hash"] = str(resolution.get("protocol_transaction_hash", ""))
+        judgment["protocol_round"] = int(resolution.get("protocol_round", 0))
+        self.responsibility_cases[case_id] = json.dumps(judgment, sort_keys=True)
+        for role in ["principal", "worker"]:
+            agent_id = judgment["principal_agent_id"] if role == "principal" else judgment["worker_agent_id"]
+            bps = judgment["delegator_responsibility_bps"] if role == "principal" else judgment["worker_responsibility_bps"]
+            role_name = "delegator" if role == "principal" else "worker"
+            metadata = {**judgment, "role": role_name, "responsibility_bps": bps}
+            final_id = str(resolution[role + "_final_event_id"])
+            self._append({
+                "event_id": final_id,
+                "event_type": "RESPONSIBILITY_JUDGMENT_FINALIZED",
+                "agent_id": agent_id,
+                "platform_id": judgment["platform_id"],
+                "job_id": judgment["job_id"],
+                "dispute_id": case_id,
+                "counterparty_id": judgment["worker_agent_id"] if role == "principal" else judgment["principal_agent_id"],
+                "category": "research",
+                "provenance": "genlayer_verified",
+                "verification_status": "finalized",
+                "references": references,
+                "metadata": metadata,
+            })
+            self._append({
+                "event_id": str(resolution[role + "_liability_event_id"]),
+                "event_type": "LIABILITY_APPORTIONED",
+                "agent_id": agent_id,
+                "platform_id": judgment["platform_id"],
+                "job_id": judgment["job_id"],
+                "dispute_id": case_id,
+                "counterparty_id": judgment["worker_agent_id"] if role == "principal" else judgment["principal_agent_id"],
+                "category": "research",
+                "provenance": "genlayer_verified",
+                "verification_status": "finalized",
+                "references": [final_id],
+                "metadata": metadata,
+            })
+
+    @gl.public.view
+    def get_responsibility_case(self, case_id: str) -> str:
+        if case_id not in self.responsibility_cases:
+            return ""
+        return self.responsibility_cases[case_id]
 
     @gl.public.view
     def get_event(self, event_id: str) -> str:

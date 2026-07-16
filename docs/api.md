@@ -99,3 +99,10 @@ Accepted jobs update reputation directly. GenLayer is used for disputed or high-
 `/agents/{id}/history`, `/agents/{id}/profile`, and `/trust/evaluate` include timeline events so marketplaces can show auditable trust history.
 
 Timeline events include an `evidence` object when related records exist. Judgment events can include the job, deliverable, dispute, judgment, transaction hash, and GenLayer explorer link.
+### Delegation accountability
+
+`POST /delegations` creates a signed authority record. `POST /delegations/{id}/accept` records worker consent, and `POST /delegations/{id}/output` records the delegated output chain.
+
+`POST /delegations/{id}/responsibility-dispute` submits the signed scope and evidence to live GenLayer. Use `/responsibility/finalize` when unappealed, or `/responsibility/appeal` followed by `/responsibility/appeal/resolve` when protocol due process is invoked.
+
+`GET /agents/{agent_id}/reputation?projection=research_trust_v6` returns the accountability-aware Passport projection.

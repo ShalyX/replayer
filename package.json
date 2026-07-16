@@ -24,7 +24,9 @@
     "smoke:v2.3": "cd apps/api && python scripts/v2_3_identity_smoke.py",
     "acceptance:v2.3": "cd apps/api && python scripts/v2_3_live_acceptance.py",
     "smoke:v2.4": "cd apps/api && python scripts/v2_4_appeals_smoke.py",
-    "acceptance:v2.4": "cd apps/api && python scripts/v2_4_live_acceptance.py"
+    "acceptance:v2.4": "cd apps/api && python scripts/v2_4_live_acceptance.py",
+    "smoke:v3.0": "cd apps/api && python scripts/v3_0_delegation_smoke.py",
+    "acceptance:v3.0": "cd apps/api && python scripts/v3_0_live_acceptance.py"
   },
   "dependencies": {
     "ethers": "^6.13.4",

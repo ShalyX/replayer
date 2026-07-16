@@ -42,6 +42,11 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
     event_id: string; event_type: string; dispute_id: string; verdict?: string;
     verification_status: string; provenance: string; transaction_hash?: string;
   }>;
+  const accountabilityChain = (profile.reputation.details?.accountability_chain || []) as Array<{
+    event_id: string; delegation_id: string; principal_agent_id: string; worker_agent_id: string;
+    role: string; outcome: string; responsibility_bps: number; lifecycle_status: string;
+    trust_impact: number; risk_impact: number; transaction_hash?: string;
+  }>;
 
   return (
     <main className="shell">
@@ -69,6 +74,30 @@ export default async function AgentProfile({ params }: { params: Promise<{ id: s
       </section>
 
       <section className="grid section-gap">
+        <section className="panel">
+          <h2>Delegation Accountability</h2>
+          <table className="table">
+            <thead><tr><th>Chain</th><th>Outcome</th><th>Allocation</th><th>Impact</th><th>Provenance</th></tr></thead>
+            <tbody>
+              {accountabilityChain.map((item) => (
+                <tr key={item.event_id}>
+                  <td>{item.principal_agent_id} to {item.worker_agent_id}<br /><span className="muted">{item.role}</span></td>
+                  <td>{(item.outcome || "pending").replaceAll("_", " ")}</td>
+                  <td>{(item.responsibility_bps / 100).toFixed(0)}%</td>
+                  <td>{item.trust_impact} trust / +{item.risk_impact} risk</td>
+                  <td>
+                    {item.transaction_hash ? (
+                      <a href={`https://explorer-studio.genlayer.com/tx/${item.transaction_hash}`} target="_blank" rel="noreferrer">
+                        {item.lifecycle_status}
+                      </a>
+                    ) : <span className="pill">{item.lifecycle_status}</span>}
+                  </td>
+                </tr>
+              ))}
+              {accountabilityChain.length === 0 ? <tr><td colSpan={5}>No delegated liability events.</td></tr> : null}
+            </tbody>
+          </table>
+        </section>
         <section className="panel">
           <h2>Appeals and Due Process</h2>
           <table className="table">

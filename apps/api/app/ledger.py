@@ -33,6 +33,10 @@ EVENT_TYPES = {
     "IDENTITY_LINK_FINALIZED", "IDENTITY_LINK_REJECTED", "IDENTITY_UNLINKED",
     "IDENTITY_CONTROLLER_ROTATED", "IDENTITY_OWNERSHIP_TRANSFERRED",
     "APPEAL_SUBMITTED", "APPEAL_RESOLVED", "JUDGMENT_UPHELD", "JUDGMENT_OVERTURNED",
+    "DELEGATION_CREATED", "DELEGATION_ACCEPTED", "AUTHORITY_SCOPE_GRANTED",
+    "SPENDING_LIMIT_SET", "WORK_SUBDELEGATED", "DELEGATED_OUTPUT_SUBMITTED",
+    "RESPONSIBILITY_DISPUTED", "RESPONSIBILITY_JUDGMENT_PROVISIONAL",
+    "RESPONSIBILITY_APPEALED", "RESPONSIBILITY_JUDGMENT_FINALIZED", "LIABILITY_APPORTIONED",
 }
 PROVENANCE = {
     "platform_reported", "counterparty_confirmed", "genlayer_provisional",
@@ -128,6 +132,8 @@ def event_dict(db: Session, event: ReputationEvent) -> dict:
 
 
 def rebuild_projection(db: Session, agent_id: str, projection: str = "research_trust_v1") -> AgentReputationProjection:
+    if projection == "research_trust_v6":
+        return rebuild_projection_v6(db, agent_id)
     if projection == "research_trust_v5":
         return rebuild_projection_v5(db, agent_id)
     if projection == "research_trust_v4":
@@ -248,6 +254,11 @@ def rebuild_all_projections(db: Session) -> list[AgentReputationProjection]:
         AgentReputationProjection.projection_version == "v5",
     ))
     projections.extend(rebuild_projection_v5(db, agent_id) for agent_id in agent_ids)
+    db.execute(delete(AgentReputationProjection).where(
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v6",
+    ))
+    projections.extend(rebuild_projection_v6(db, agent_id) for agent_id in agent_ids)
     return projections
 
 
@@ -835,6 +846,116 @@ def ensure_projection_version_v5(db: Session) -> None:
             "appealed_multiplier_bps": 5000,
             "finalized_source": "research_trust_v4 finalized judgment weights",
             "superseded_weight": 0,
+        }))
+
+
+def _scaled_liability(value: int, responsibility_bps: int) -> int:
+    magnitude = (abs(value) * responsibility_bps + 5000) // 10_000
+    return -magnitude if value < 0 else magnitude
+
+
+def rebuild_projection_v6(db: Session, agent_id: str) -> AgentReputationProjection:
+    base = rebuild_projection_v5(db, agent_id)
+    members = list((base.details or {}).get("linked_agent_ids") or [agent_id])
+    events = db.scalars(select(ReputationEvent).where(
+        ReputationEvent.agent_id.in_(members)
+    ).order_by(ReputationEvent.occurred_at, ReputationEvent.event_id)).all()
+    final_cases = {
+        str(event.event_metadata.get("responsibility_case_id")) for event in events
+        if event.event_type == "LIABILITY_APPORTIONED"
+    }
+    appealed_cases = {
+        str(event.event_metadata.get("responsibility_case_id")) for event in db.scalars(
+            select(ReputationEvent).where(ReputationEvent.event_type == "RESPONSIBILITY_APPEALED")
+        ).all()
+    }
+    trust_delta = 0
+    risk_delta = 0
+    fraud_incidents = 0
+    accountability_chain = []
+    for event in events:
+        if event.event_type not in {"RESPONSIBILITY_JUDGMENT_PROVISIONAL", "LIABILITY_APPORTIONED"}:
+            continue
+        metadata = event.event_metadata or {}
+        case_id = str(metadata.get("responsibility_case_id") or event.dispute_id or "")
+        if event.event_type == "RESPONSIBILITY_JUDGMENT_PROVISIONAL" and case_id in final_cases:
+            continue
+        bps = max(0, min(10_000, int(metadata.get("responsibility_bps") or 0)))
+        multiplier_bps = 10_000 if event.event_type == "LIABILITY_APPORTIONED" else 2500
+        lifecycle_status = "finalized" if event.event_type == "LIABILITY_APPORTIONED" else "provisional"
+        if case_id in appealed_cases and lifecycle_status == "provisional":
+            multiplier_bps = 1250
+            lifecycle_status = "appealed"
+        effective_bps = bps * multiplier_bps // 10_000
+        event_trust = _scaled_liability(-30, effective_bps)
+        event_risk = _scaled_liability(45, effective_bps)
+        trust_delta += event_trust
+        risk_delta += event_risk
+        role = str(metadata.get("role") or "")
+        if lifecycle_status == "finalized" and role == "worker" and bps >= 5000 and metadata.get("impact_kind") == "fabricated_sources":
+            fraud_incidents += 1
+        accountability_chain.append({
+            "event_id": event.event_id,
+            "responsibility_case_id": case_id,
+            "delegation_id": metadata.get("delegation_id"),
+            "principal_agent_id": metadata.get("principal_agent_id"),
+            "worker_agent_id": metadata.get("worker_agent_id"),
+            "role": role,
+            "outcome": metadata.get("outcome"),
+            "responsibility_bps": bps,
+            "lifecycle_status": lifecycle_status,
+            "trust_impact": event_trust,
+            "risk_impact": event_risk,
+            "transaction_hash": event.transaction_hash,
+            "contract_address": event.contract_address,
+        })
+    trust = max(0, min(100, base.trust_score + trust_delta))
+    risk = max(0, min(100, base.risk_score + risk_delta))
+    status = "flagged" if risk >= 60 or base.status == "flagged" else "review" if risk >= 35 else base.status
+    row = db.scalars(select(AgentReputationProjection).where(
+        AgentReputationProjection.agent_id == agent_id,
+        AgentReputationProjection.projection_name == "research_trust",
+        AgentReputationProjection.projection_version == "v6",
+    )).first()
+    if not row:
+        row = AgentReputationProjection(
+            agent_id=agent_id, projection_name="research_trust", projection_version="v6"
+        )
+        db.add(row)
+    row.trust_score = trust
+    row.risk_score = risk
+    row.status = status
+    row.completed_jobs = base.completed_jobs
+    row.successful_jobs = base.successful_jobs
+    row.disputes = base.disputes
+    row.fraud_incidents = base.fraud_incidents + fraud_incidents
+    row.last_event_id = events[-1].event_id if events else base.last_event_id
+    row.calculated_at = datetime.utcnow()
+    row.details = {
+        **(base.details or {}),
+        "accountability_projection": True,
+        "base_projection": "research_trust_v5",
+        "liability_trust_delta": trust_delta,
+        "liability_risk_delta": risk_delta,
+        "accountability_chain": accountability_chain,
+    }
+    ensure_projection_version_v6(db)
+    db.flush()
+    return row
+
+
+def ensure_projection_version_v6(db: Session) -> None:
+    existing = db.scalars(select(ProjectionVersion).where(
+        ProjectionVersion.projection_name == "research_trust", ProjectionVersion.version == "v6"
+    )).first()
+    if not existing:
+        db.add(ProjectionVersion(projection_name="research_trust", version="v6", configuration={
+            "base_projection": "research_trust_v5",
+            "final_liability_impact": {"trust": -30, "risk": 45},
+            "provisional_multiplier_bps": 2500,
+            "appealed_multiplier_bps": 1250,
+            "allocation": "half-up integer scaling by responsibility_bps",
+            "invariant": "reputation follows finalized responsibility allocation",
         }))
 
 

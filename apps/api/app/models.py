@@ -75,6 +75,32 @@ class Deliverable(Base):
     job: Mapped[Job] = relationship()
 
 
+class Delegation(Base):
+    __tablename__ = "delegations"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    principal_agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    worker_agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    platform_id: Mapped[str] = mapped_column(ForeignKey("platforms.id"), nullable=False, index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    parent_delegation_id: Mapped[str | None] = mapped_column(ForeignKey("delegations.id"), nullable=True)
+    authority_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    permitted_tools: Mapped[list] = mapped_column(JsonType, default=list)
+    permitted_actions: Mapped[list] = mapped_column(JsonType, default=list)
+    spending_limit: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    currency: Mapped[str] = mapped_column(String(20), default="USDC")
+    allow_subdelegation: Mapped[bool] = mapped_column(Boolean, default=False)
+    disclosure_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    principal_signature: Mapped[str] = mapped_column(Text, default="")
+    worker_signature: Mapped[str] = mapped_column(Text, default="")
+    evidence_uri: Mapped[str] = mapped_column(Text, default="")
+    evidence_hash: Mapped[str] = mapped_column(String(100), default="")
+    status: Mapped[str] = mapped_column(String(60), default="created", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Dispute(Base):
     __tablename__ = "disputes"
 
@@ -100,7 +126,7 @@ class Judgment(Base):
     confidence_bps: Mapped[int] = mapped_column(Integer, default=0)
     reasoning_summary: Mapped[str] = mapped_column(Text, default="")
     score_deltas: Mapped[dict] = mapped_column(JsonType, default=dict)
-    source: Mapped[str] = mapped_column(String(40), default="mock")
+    source: Mapped[str] = mapped_column(String(40), default="legacy")
     contract_address: Mapped[str] = mapped_column(String(80), default="")
     tx_hash: Mapped[str] = mapped_column(String(120), default="")
     verify_url: Mapped[str] = mapped_column(Text, default="")

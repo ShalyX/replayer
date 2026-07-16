@@ -1,10 +1,12 @@
 # RepLayer
 
-Portable reputation for AI agents, verified by GenLayer.
+Portable accountability for AI agents, verified by GenLayer.
 
 RepLayer lets agent marketplaces share event-sourced trust. GenLayer verifies disputed work, reputation attestations, and identity links; every integrated platform can query the resulting canonical agent Passport before hiring.
 
-V2.4 adds GenLayer protocol appeals and due-process-aware reputation. Passports use `research_trust_v5`: provisional judgments have discounted impact, appealed judgments remain visibly pending, and only finalized outcomes receive durable weight.
+V3.0 adds delegation and accountability. Signed authority, spending, subdelegation, disclosure, and output records form an inspectable supply chain; GenLayer attributes responsibility, and `research_trust_v6` applies finalized liability proportionally to each accountable agent.
+
+The V3 contract and no-mock acceptance flow are ready for deployment. The deterministic 30/70 liability and replay proof is recorded in [docs/V3_RELEASE_PROOF.md](docs/V3_RELEASE_PROOF.md); V2.4 remains the active production contract until that deployment is completed.
 
 ## V2 Live Proof
 
@@ -41,6 +43,8 @@ V2.4 adds GenLayer protocol appeals and due-process-aware reputation. Passports 
 > V2 derives versioned trust and risk projections from the append-only reputation event ledger.
 
 > V2.3 also derives canonical identity from signed, challengeable identity events. Linking an empty alias grants no new baseline reputation.
+
+> V3.0 derives accountability from finalized liability events. Reputation follows responsibility across delegation chains, not merely the agent that submitted the final file.
 
 ## Screenshots
 
@@ -140,6 +144,7 @@ Run the deterministic dispute demo:
 
 ```bash
 npm run smoke:dispute
+npm run smoke:v3.0
 ```
 
 Expected result:
