@@ -1,56 +1,61 @@
 import Link from "next/link";
+import { api } from "../../lib/api";
 
-const statuses = [
-  {
-    label: "Hosted API",
-    status: "ready",
-    detail: "FastAPI service is deployment-ready with Render configuration."
-  },
-  {
-    label: "Platform Accounts",
-    status: "ready",
-    detail: "Marketplaces can register platform identities."
-  },
-  {
-    label: "API Keys",
-    status: "ready",
-    detail: "Admin keys create platform keys; platform keys authenticate pilot writes."
-  },
-  {
-    label: "Ownership Enforcement",
-    status: "ready",
-    detail: "Platform keys can write only to agents and jobs owned by that platform."
-  },
-  {
-    label: "SDK",
-    status: "ready",
-    detail: "The TypeScript SDK covers platform, agent, job, history, and trust evaluation calls."
-  },
-  {
-    label: "GenLayer Live Mode",
-    status: "pilot",
-    detail: "Live judgment mode exists, with fallback-safe demo handling for RPC instability."
-  },
-  {
-    label: "Reputation Passport",
-    status: "ready",
-    detail: "Public agent profiles expose scores, timeline, disputes, and judgment evidence."
-  },
-  {
-    label: "Marketplace Policy Engine",
-    status: "ready",
-    detail: "Marketplaces submit policy inline to evaluate eligibility without RepLayer owning the decision."
-  }
-];
+export const dynamic = "force-dynamic";
 
-export default function PilotPage() {
+type Health = {
+  ok: boolean;
+  genlayer_mode: string;
+  source_of_truth: string;
+  contract_address: string;
+  counts: { platforms: number; agents: number; jobs: number };
+};
+
+type IndexerHealth = {
+  status: string;
+  contract_address: string;
+  last_processed_block: number;
+  last_processed_event_id: string | null;
+  last_sync_at: string | null;
+  lag: number;
+};
+
+export default async function PilotPage() {
+  const [runtimeResult, indexerResult] = await Promise.allSettled([
+    api<Health>("/health"),
+    api<IndexerHealth>("/health/indexer"),
+  ]);
+  const runtime = runtimeResult.status === "fulfilled" ? runtimeResult.value : null;
+  const indexer = indexerResult.status === "fulfilled" ? indexerResult.value : null;
+  const healthy = Boolean(runtime?.ok && runtime.genlayer_mode === "live" && indexer?.status === "healthy" && indexer.lag === 0);
+
+  const statuses = [
+    {
+      label: "API runtime",
+      status: runtime?.ok ? "ready" : "unavailable",
+      detail: runtime ? `${runtime.counts.platforms} platforms, ${runtime.counts.agents} agents, and ${runtime.counts.jobs} jobs indexed.` : "The API health endpoint did not respond."
+    },
+    {
+      label: "GenLayer source of truth",
+      status: runtime?.genlayer_mode === "live" ? "ready" : "unavailable",
+      detail: runtime ? `${runtime.source_of_truth} at ${runtime.contract_address}.` : "No live contract status is available."
+    },
+    {
+      label: "Ledger indexer",
+      status: indexer?.status === "healthy" ? "ready" : "unavailable",
+      detail: indexer ? `Block ${indexer.last_processed_block}, lag ${indexer.lag}, last sync ${indexer.last_sync_at ?? "not yet synced"}.` : "The indexer health endpoint did not respond."
+    },
+    {
+      label: "Projection freshness",
+      status: indexer?.status === "healthy" && indexer.lag === 0 ? "ready" : "attention",
+      detail: indexer?.lag === 0 ? "Indexed ledger state is current with the configured contract reader." : `Indexer lag is ${indexer?.lag ?? "unknown"}.`
+    }
+  ];
+
   return (
     <main className="shell">
       <header className="topbar">
-        <div>
-          <p className="brand-mark">RepLayer</p>
-          <h1>RepLayer Pilot Status</h1>
-        </div>
+        <div><p className="brand-mark">RepLayer</p><h1>Runtime readiness</h1></div>
         <nav className="nav">
           <Link className="secondary" href="/">Dashboard</Link>
           <Link className="secondary" href="/integrate">Integrate</Link>
@@ -61,28 +66,21 @@ export default function PilotPage() {
 
       <section className="hero-band">
         <div>
-          <p className="eyebrow">Pilot adoption readiness</p>
-          <p className="lede">
-            RepLayer has the core infrastructure a test marketplace needs to evaluate portable agent reputation.
-          </p>
-          <p className="supporting-copy">
-            This dashboard separates what works today from what still needs production hardening before broad release.
-          </p>
+          <p className="eyebrow">Live system state</p>
+          <p className="lede">Readiness is derived from the deployed API and GenLayer indexer, not a release checklist.</p>
+          <p className="supporting-copy">Contract mode, indexed counts, synchronization state, and lag are refreshed for each request.</p>
         </div>
         <div className="pilot-summary">
-          <span>Ready items</span>
-          <strong>7 / 8</strong>
-          <p>GenLayer live mode is pilot-capable while production RPC hardening continues.</p>
+          <span>Current status</span>
+          <strong>{healthy ? "Operational" : "Attention required"}</strong>
+          <p>{healthy ? "Live contract mode is active and the indexer reports no lag." : "One or more runtime checks are unavailable or behind."}</p>
         </div>
       </section>
 
       <section className="status-grid">
         {statuses.map((item) => (
           <article className="status-card" key={item.label}>
-            <div className="section-head">
-              <h2>{item.label}</h2>
-              <span className={`status-badge ${item.status}`}>{item.status}</span>
-            </div>
+            <div className="section-head"><h2>{item.label}</h2><span className={`status-badge ${item.status}`}>{item.status}</span></div>
             <p>{item.detail}</p>
           </article>
         ))}

@@ -3,7 +3,7 @@ import Link from "next/link";
 const snippet = `import { AgentReputationClient } from "@agent-reputation-registry/sdk";
 
 const client = new AgentReputationClient({
-  baseUrl: "https://api.replayer.example",
+  baseUrl: process.env.REPLAYER_API_URL,
   apiKey: process.env.REPLAYER_API_KEY
 });
 
@@ -44,7 +44,9 @@ export default function IntegrationsPage() {
 GET /agents/{agent_id}/history
 POST /trust/evaluate
 POST /jobs/{job_id}/dispute
-POST /jobs/{job_id}/evaluate`}</pre>
+POST /jobs/{job_id}/evaluate
+POST /delegations
+POST /delegations/{delegation_id}/responsibility-dispute`}</pre>
         </section>
         <section className="panel">
           <h2>SDK Snippet</h2>

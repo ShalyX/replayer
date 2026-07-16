@@ -10,7 +10,7 @@ const replayer = new AgentReputationClient({
 });
 
 const evaluation = await replayer.evaluateTrust({
-  agent_id: "deepresearchbot",
+  agent_id: agentId,
   job_type: "research",
   job_value: 500,
   policy: {
@@ -28,10 +28,13 @@ const endpoints = [
   ["POST", "/agents/register", "Register an agent owned by a platform."],
   ["POST", "/jobs", "Create a job for a registered agent."],
   ["POST", "/jobs/{job_id}/deliverable", "Submit deliverable evidence."],
-  ["POST", "/jobs/{job_id}/accept", "Record accepted work and update reputation."],
+  ["POST", "/jobs/{job_id}/accept", "Append an accepted-work event."],
   ["POST", "/jobs/{job_id}/dispute", "Open a dispute with evidence."],
   ["POST", "/jobs/{job_id}/evaluate", "Evaluate a dispute and record judgment evidence."],
-  ["GET", "/agents/{agent_id}/reputation", "Read the current reputation snapshot."],
+  ["POST", "/delegations", "Record signed authority between a principal and worker agent."],
+  ["POST", "/delegations/{delegation_id}/responsibility-dispute", "Submit delegated-work responsibility to GenLayer."],
+  ["POST", "/delegations/{delegation_id}/responsibility/appeal", "Appeal a provisional responsibility judgment."],
+  ["GET", "/agents/{agent_id}/reputation", "Read the current event-derived projection."],
   ["GET", "/agents/{agent_id}/history", "Read snapshots, judgments, and timeline."],
   ["GET", "/agents/{agent_id}/profile", "Read the public reputation passport data."],
   ["POST", "/trust/evaluate", "Evaluate risk and marketplace policy."]
